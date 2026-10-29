@@ -1,0 +1,13 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+const root=import.meta.dirname,source=path.join(root,'dist'),target=path.join(root,'docs');
+await fs.mkdir(target,{recursive:true});
+const files=['index.html','app-v2.js','model.js','exports.js','export-settings.js','export-ui.js','styles.css','v2.css','v3.css','catalog-data.js','catalog.json','branding-assets.js'];
+for(const file of files)await fs.copyFile(path.join(source,file),path.join(target,file));
+await fs.cp(path.join(source,'vendor'),path.join(target,'vendor'),{recursive:true});
+await fs.mkdir(path.join(target,'assets'),{recursive:true});
+for(const file of ['branding-lth.png','branding-lu.png'])await fs.copyFile(path.join(source,'assets',file),path.join(target,'assets',file));
+await fs.writeFile(path.join(target,'.nojekyll'),'');
+const html=await fs.readFile(path.join(target,'index.html'),'utf8');
+for(const match of html.matchAll(/(?:src|href)="([^"#:]+\.(?:js|css))"/g))await fs.access(path.join(target,match[1]));
+console.log('GitHub Pages-filerna är klara i docs/.');

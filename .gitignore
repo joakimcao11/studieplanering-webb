@@ -1,0 +1,11 @@
+node_modules/
+qa/
+data/
+.env
+.env.*
+*.zip
+Studieplanering.html
+dist/app.js
+dist/assets/*-proof.png
+dist/standalone-preview.html
+*.log

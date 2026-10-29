@@ -1,0 +1,4 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {exportSnapshot} from '../dist/exports.js';
+test('Dokumentunderlaget behåller anteckningar och sorterar kurser utan att ändra originalet',()=>{const s={name:'Åsa Öberg',program:'D',year:'2',note:'Nästa steg\nFölj upp i vår.'};const c=[{title:'Sen kurs',code:'B',start:'2027-06-01',end:'2027-07-31',credits:7.5,status:'planned'},{title:'Tidig kurs',code:'A',start:'2026-08-01',end:'2026-10-31',credits:6,status:'done'}];const snapshot=exportSnapshot(s,c,'Läsår 2026/2027',{academicYearLabel:'2026/2027',fetchedAt:'2026-10-28T00:00:00Z',sourceUrl:'https://kurser.lth.se/lot/programme?ay=26_27'});assert.equal(snapshot.total,13.5);assert.equal(snapshot.done,6);assert.equal(snapshot.courses[0].code,'A');assert.equal(c[0].code,'B');assert.equal(snapshot.student.note,s.note);assert.match(snapshot.source,/2026-10-28/);assert.equal(snapshot.courses[0].statusLabel,'Avklarad');});

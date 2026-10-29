@@ -1,0 +1,13 @@
+{
+  "name": "studieplanering",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs",
+    "check": "node --check dist/app-v2.js && node --check dist/model.js && node --check dist/exports.js && node --check dist/export-ui.js && node --check dist/export-settings.js",
+    "test": "node --test tests/*.test.mjs",
+    "build": "node build.mjs",
+    "sync:catalog": "node --use-system-ca tools/sync-lth-catalog.mjs",
+    "pages": "node prepare-pages.mjs"
+  }
+}

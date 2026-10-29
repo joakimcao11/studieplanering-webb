@@ -1,0 +1,1 @@
+@pdf-lib/fontkit 1.1.1. License: MIT, as declared in upstream README and package.json. Upstream: https://github.com/Hopding/fontkit. Original fontkit: https://github.com/foliojs/fontkit. The upstream npm package does not ship a separate LICENSE file.

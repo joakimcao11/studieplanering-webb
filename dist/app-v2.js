@@ -1,48 +1,91 @@
-import {months,period,intersects,visibleCourses,validateCourse,switchedYear,moveCourse,validateImport,summarize,removeStudentPlan,restoreStudentPlan,purgeStudentPlan,coursePace} from './model.js';
-import {downloadFile} from './exports.js';
-import {openExportPanel} from './export-ui.js';
-const KEY='studieplan-v1',catalog=globalThis.STUDIE_CATALOG;
-const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const fmt=n=>Number(n).toLocaleString('sv-SE'),uid=()=>crypto.randomUUID();
-const labels={calendar:'Kalenderår',academic:'Läsår',autumn:'Hösttermin',spring:'Vårtermin'},statuses={planned:'Planerad',progress:'Pågår',done:'Avklarad',summer:'Sommarstudier'};
-const date=s=>new Date(s+'T12:00:00').toLocaleDateString('sv-SE',{day:'numeric',month:'short',year:'numeric'});
-const sourceCourse=code=>catalog?.courses.find(c=>c.code===code);
-const safeURL=value=>{try{const u=new URL(value);return u.protocol==='https:'&&(u.hostname==='kurser.lth.se'||u.hostname.endsWith('.lth.se')||u.hostname.endsWith('.lth.lu.se')||u.hostname==='cloud.timeedit.net')?esc(u.href):'';}catch{return '';}};
-const initial={version:2,demo:true,students:[{id:'s1',name:'Alex Andersson',program:'Datateknik',programmeId:'D',year:'Årskurs 2',note:'Följ upp studietakten inför vårterminen.\nDiskutera intressanta kurser och ett alternativ med sommarstudier.',targetCredits:60},{id:'s2',name:'Sam Nilsson',program:'Maskinteknik',programmeId:'M',year:'Årskurs 1',note:'',targetCredits:60}],courses:[]};
-[['FMAB20','2026-08-24','2026-10-30','progress'],['EDAA30','2026-08-24','2026-12-18','progress'],['FMAB25','2026-11-02','2026-12-18','planned'],['EDAF05','2027-01-18','2027-03-26','planned'],['EDAF20','2027-03-29','2027-06-04','planned']].forEach(([code,start,end,status])=>{const c=sourceCourse(code);if(c)initial.courses.push({id:uid(),studentId:'s1',code,title:c.title,credits:c.credits,level:c.level,start,end,status,note:'Exempel på planering. Datum behöver stämmas av mot faktiskt kurstillfälle.',sourceUrl:c.syllabusUrl,catalogYear:catalog.academicYear,datesArePlanning:true});});
-let data,storageError=false;try{const saved=localStorage.getItem(KEY);data=saved?validateImport({...JSON.parse(saved),version:JSON.parse(saved).version||1}):structuredClone(initial);}catch{data=structuredClone(initial);storageError=true;}
-for(const s of data.students){s.targetCredits=Number(s.targetCredits)||60;s.programmeId??=s.program.includes('Datateknik')?'D':s.program.includes('Maskinteknik')?'M':'';}
-let studentId=data.students[0]?.id||null,mode='academic',year=2026,selected='2026-10',page='plan',view='timeline',filter={q:'',programme:data.students[0]?.programmeId||'',specialization:'',level:'',inactive:false,limit:20},dragged=null;
-const student=()=>data.students.find(s=>s.id===studentId),range=()=>period(mode,year),studentCourses=()=>data.courses.filter(c=>c.studentId===studentId),shownCourses=()=>visibleCourses(data.courses,studentId,range());
-function save(){try{data.version=2;localStorage.setItem(KEY,JSON.stringify(data));storageError=false;return true;}catch{storageError=true;toast('Kunde inte spara. Exportera en säkerhetskopia innan du stänger.');return false;}}
-function toast(message,undo){const t=document.querySelector('#toast');t.replaceChildren(document.createTextNode(message));if(undo){const b=document.createElement('button');b.textContent='Ångra';b.onclick=()=>{undo();save();render();toast('Ändringen har ångrats.');};t.append(b);}t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),undo?12000:5000);}
+import { months, period, intersects, visibleCourses, validateCourse, switchedYear, moveCourse, summarize, coursePace, monthEnd } from './model.js';
+import { CASE_KEY, LEGACY_KEY, emptyWorkspace, newId, cleanCase, loadWorkspace, saveWorkspace, caseBackup, importCases, legacyChoices, migrateLegacy, exportPreferences } from './cases.js';
+import { casesPage, caseTitle, caseDescription, caseForm, caseProgram, casePrivacy, calendarPanel } from './case-view.js';
+import { catalogPage, catalogResults, catalogCourseDetails, htmlEscape, officialLink, programmeOptions } from './catalog-view.js';
+import { programmeStructure } from './lth-calendar.js';
+import { periodLabel } from './program-catalog.js';
+import { downloadFile } from './exports.js';
+import { openExportPanel } from './export-ui.js';
+
+const catalog = globalThis.STUDIE_CATALOG;
+const esc = htmlEscape;
+const fmt = n => Number(n).toLocaleString('sv-SE');
+const labels = { calendar:'Kalenderår', academic:'Läsår', autumn:'Hösttermin', spring:'Vårtermin' };
+const statuses = { planned:'Planerad', progress:'Pågår', done:'Avklarad', summer:'Sommarstudier' };
+const date = s => new Date(s + 'T12:00:00').toLocaleDateString('sv-SE', { day:'numeric', month:'short', year:'numeric' });
+const courseIndex = new Map(catalog.courses.map(c => [c.code,c]));
+const sourceCourse = code => courseIndex.get(code);
+const storage = {
+ getItem: key => localStorage.getItem(key),
+ setItem: (key, value) => localStorage.setItem(key, value),
+ removeItem: key => localStorage.removeItem(key)
+};
+let lastSaved = null;
+try { lastSaved = storage.getItem(CASE_KEY); } catch { /* Handled by loadWorkspace. */ }
+let { data, error: storageError } = loadWorkspace(storage, catalog);
+let readError = storageError;
+const localDate = new Date().toLocaleDateString('sv-SE', { timeZone:'Europe/Stockholm' });
+const defaultYear = Number(localDate.slice(0,4)) - (Number(localDate.slice(5,7)) < 8 ? 1 : 0);
+const activeCase = () => data.cases.find(c => c.id === data.activeCaseId);
+let mode = 'academic', year = activeCase()?.planningYear ?? defaultYear;
+let selected = year + '-08', page = 'cases', dragged = null;
+let view = matchMedia('(max-width: 700px)').matches ? 'list' : 'timeline';
+let legacy = null, legacyExpanded = true, migrationGroups = null, pendingCourse = null;
+try { legacy = storage.getItem(LEGACY_KEY); } catch { /* Storage failure is surfaced above. */ }
+
+function defaultFilter(programme = activeCase()?.programmeId || '') {
+ return { programme, programmeQuery:'', q:'', year:'', category:'', specialization:'', lp:'', status:'', expanded:!matchMedia('(max-width: 700px)').matches };
+}
+let filter = defaultFilter();
+const range = () => period(mode, year);
+const activeCourses = () => data.courses.filter(c => c.caseId === data.activeCaseId);
+const shownCourses = () => visibleCourses(data.courses, data.activeCaseId, range());
+const saveLabel = () => storageError ? 'Sparning misslyckades · osparade ändringar' : data.cases.length ? 'Sparat på den här enheten' : 'Lokal arbetsyta';
+
+function save(touch = false) {
+ if (touch && activeCase()) activeCase().updatedAt = new Date().toISOString();
+ try {
+  storageError = readError || storage.getItem(CASE_KEY) !== lastSaved || !saveWorkspace(storage, data, catalog);
+  if (!storageError) lastSaved = storage.getItem(CASE_KEY);
+ } catch { storageError = true; }
+ const status = document.querySelector('#save-status');
+ if (status) status.textContent = saveLabel();
+ return !storageError;
+}
+
+function setActive(id) {
+ data.activeCaseId = id;
+ mode = 'academic';
+ year = activeCase()?.planningYear ?? defaultYear;
+ selected = year + '-08';
+ filter = defaultFilter();
+}
+
+function caseCard() {
+ const record = activeCase();
+ const unverified = activeCourses().filter(c => (c.catalogYear || sourceCourse(c.code)) &&
+  (!c.catalogYear || record.planningYear !== Number('20' + c.catalogYear.slice(0,2)) ||
+   !sourceCourse(c.code)?.offerings.some(o => o.programmeId === record.programmeId)));
+ return `<section class="panel active-case" aria-label="Aktivt ärende"><div><h2>${caseTitle(record)}</h2><p>${esc(caseDescription(record,catalog))}</p>${record.admissionYear ? '<p>Utbildningsplanens krav är ej verifierade för vald antagningskull.</p>' : ''}</div>
+ <div class="actions"><button data-action="edit-case">Ändra grundinformation</button><button data-case-copy="${record.id}">Skapa alternativ</button><button data-action="close-case">Stäng ärende</button></div>
+ ${unverified.length ? '<p class="notice">Behöver kontrolleras för valt program och läsår: ' + esc(unverified.map(c => c.code).join(', ')) + '.</p>' : ''}</section>`;
+}
+
+function toast(message,undo){const t=document.querySelector('#toast');t.replaceChildren(document.createTextNode(message));if(undo){const b=document.createElement('button');b.textContent='Ångra';b.onclick=()=>{undo();const ok=save();render();toast(ok?'Ändringen har ångrats.':'Ändringen ångrades i arbetsytan. Sparning misslyckades.');};t.append(b);}t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),undo?12000:5000);}
 function title(){return mode==='academic'?`${year} / ${year+1}`:mode==='autumn'?`HT ${year}`:mode==='spring'?`VT ${year}`:String(year);}
 function season(m){return m.month>=7?'autumn':m.month>=5?'summer':'spring';}
-function setStudent(id){studentId=id;filter.programme=student()?.programmeId||'';filter.specialization='';filter.limit=20;}
-function studentCard(){const s=student();if(!s)return emptyStudents();return `<section class="student-card" aria-label="Vald student"><div class="avatar">${esc(s.name.split(' ').map(n=>n[0]).slice(0,2).join(''))}</div><div class="student-info"><label class="sr-only" for="student-select">Välj student</label><select id="student-select">${data.students.map(v=>`<option value="${esc(v.id)}" ${v.id===s.id?'selected':''}>${esc(v.name)}</option>`).join('')}</select><p>${esc(s.program)} &nbsp; / &nbsp; ${esc(s.year)}</p></div><button data-action="edit-student">Redigera student</button><button data-action="alternative" title="Kopiera planen för att prova andra kurser">Skapa alternativ</button></section>`;}
 function courseBar(c,r){const indices=r.map((m,i)=>intersects(c,m)?i:-1).filter(i=>i>=0);return `<div class="course-row timeline-grid"><button class="course-details" data-edit="${esc(c.id)}" aria-label="Redigera ${esc(c.title)}"><b>${esc(c.title)}</b><small>${esc(c.code||'Egen kurs')} · ${fmt(c.credits)} hp ${c.level?'· '+esc(c.level):''}</small></button>${r.map((m,i)=>`<div class="cell ${season(m)==='summer'?'summer-cell':''} ${m.key===selected?'selected-cell':''}" style="grid-column:${i+2}" data-drop-month="${m.key}"></div>`).join('')}<button draggable="false" data-drag-course="${esc(c.id)}" class="bar ${esc(c.status)}" style="grid-column:${indices[0]+2} / ${indices.at(-1)+3}" data-edit="${esc(c.id)}" title="Dra för att flytta. Klicka för att redigera ${esc(c.title)}." aria-label="Flytta eller redigera ${esc(c.title)}">⠿ ${statuses[c.status]} · ${fmt(c.credits)} hp</button></div>`;}
 function timeline(courses,r){const groups=[];for(const m of r){const key=season(m);if(groups.at(-1)?.key===key)groups.at(-1).count++;else groups.push({key,count:1,year:m.year});}return `<div class="timeline-scroll"><div class="timeline" style="--columns:${r.length}"><div class="season-row timeline-grid"><div class="season-label">${labels[mode].toUpperCase()} ${title()}</div>${groups.map(g=>`<div class="season ${g.key}" style="grid-column:span ${g.count}">${g.key==='autumn'?'HÖST':g.key==='spring'?'VÅR':'SOMMAR'} ${g.year}</div>`).join('')}</div><div class="month-row timeline-grid"><div class="course-label">Kurs / högskolepoäng</div>${r.map(m=>`<button class="month ${m.key===selected?'active':''}" data-month="${m.key}" data-drop-month="${m.key}" aria-pressed="${m.key===selected}" aria-label="${months[m.month]} ${m.year}">${months[m.month].slice(0,3)}</button>`).join('')}</div>${courses.map(c=>courseBar(c,r)).join('')||`<div class="empty-start"><h3>Din studieplan är redo att fyllas</h3><p>1. Utforska kursutbudet &nbsp; 2. Lägg till en kurs &nbsp; 3. Placera den i en månad</p><button class="primary" data-page="catalog">Utforska kurser</button></div>`}</div></div>`;}
-function courseList(courses){return `<div class="table-scroll"><table class="course-table"><thead><tr><th>Kurs</th><th>Hp</th><th>Planeringsdatum</th><th>Status</th><th>Ändra</th></tr></thead><tbody>${courses.map(c=>`<tr><td><b>${esc(c.title)}</b><small>${esc(c.code||'Egen kurs')} ${c.level?'· '+esc(c.level):''}</small></td><td>${fmt(c.credits)}</td><td>${date(c.start)}<br>${date(c.end)}</td><td><span class="status-tag ${esc(c.status)}">${statuses[c.status]}</span></td><td><button data-edit="${esc(c.id)}">Redigera / flytta</button></td></tr>`).join('')||'<tr><td colspan="5">Inga kurser i perioden. Välj Lägg till kurs för att börja.</td></tr>'}</tbody></table></div>`;}
-function planView(){const s=student(),r=range();if(!r.some(m=>m.key===selected))selected=r[0].key;const courses=shownCourses(),summary=summarize(courses),whole=summarize(studentCourses()),chosen=r.find(m=>m.key===selected),inMonth=courses.filter(c=>intersects(c,chosen));return `<header class="heading"><div><p class="eyebrow">PLANERA TILLSAMMANS</p><h1>Studieplanering</h1><p>Utforska kurser, prova alternativ och planera nästa steg.</p></div><div class="actions"><button data-action="export">↓ Exportera</button><button class="primary" data-page="catalog">＋ Lägg till kurs</button></div></header>${studentCard()}<section class="stats" aria-label="Poängöversikt"><div class="stat"><label>Kurser i vald period</label><strong>${fmt(summary.credits)} <span>hp</span></strong><p>${courses.length} kurser · ${labels[mode].toLowerCase()} ${title()}</p></div><div class="stat"><label>Avklarat i hela planen</label><strong>${fmt(whole.done)} <span>av ${fmt(s.targetCredits)} hp i eget mål</span></strong><progress value="${whole.done}" max="${s.targetCredits}" aria-label="Avklarade poäng mot eget mål"></progress><p>Målet ändras under Redigera student.</p></div><div class="stat"><label>Avancerad nivå i vald period</label><strong>${fmt(summary.advanced)} <span>hp med känd A-nivå</span></strong><p><button class="text-button compact" data-page="help">Hur räknas poäng och mål? ↗</button></p></div></section>${storageError?'<p class="notice">Lokal sparning är otillgänglig. Exportera en säkerhetskopia.</p>':''}${planningOverview()}<section class="planning" aria-label="Studieplanens tidslinje"><div class="planning-head"><div><h2>Studieplanen</h2><p>Dra en kurs till en månad eller klicka för att redigera och flytta.</p></div><div class="segmented" aria-label="Välj tidsperiod">${Object.entries(labels).map(([key,label])=>`<button data-mode="${key}" aria-pressed="${mode===key}" class="${mode===key?'active':''}">${label}</button>`).join('')}</div></div><div class="controls"><div class="year-selector"><button data-year="-1" aria-label="Föregående år">←</button><strong>${title()}</strong><button data-year="1" aria-label="Nästa år">→</button></div><div class="segmented view-switch" aria-label="Visningssätt"><button data-view="timeline" class="${view==='timeline'?'active':''}" aria-pressed="${view==='timeline'}">▦ Tidslinje</button><button data-view="list" class="${view==='list'?'active':''}" aria-pressed="${view==='list'}">☷ Kurslista</button></div></div>${view==='timeline'?timeline(courses,r):courseList(courses)}<div class="planning-foot"><span>Egna planeringsdatum · juni och juli markeras som sommar.</span><button class="text-button compact" data-action="custom-course">＋ Skapa egen kurs</button></div></section><div class="lower"><section class="panel"><div class="panel-head"><h2>${months[chosen.month]} ${chosen.year}</h2><button data-page="catalog">＋ Lägg till kurs</button></div><p class="month-summary">${inMonth.length} kurser överlappar den här månaden.</p>${inMonth.map(c=>`<div class="course-item"><span class="mini-dot"></span><div><b>${esc(c.title)}</b><small>${date(c.start)} – ${date(c.end)} · ${statuses[c.status]}</small></div><button data-complete="${esc(c.id)}">${c.status==='done'?'Markera som planerad':'Markera som avklarad'}</button><button data-edit="${esc(c.id)}" aria-label="Öppna ${esc(c.title)}">↗</button></div>`).join('')||'<p class="empty">Välj en kurs i kursutbudet och placera den här. Du kan ändra senare.</p>'}<p class="note-footer">Kursens hela poäng räknas en gång. Överlapp betyder inte automatiskt schemakrock.</p></section><section class="panel"><div class="panel-head"><h2>Anteckningar och nästa steg</h2><span class="pill">${esc(s.name.split(' ')[0])}</span></div><label class="sr-only" for="student-note">Vägledningsanteckningar</label><textarea class="note-area" id="student-note" maxlength="20000" placeholder="Vad vill studenten utforska? Vad har ni kommit överens om? När följer ni upp?">${esc(s.note)}</textarea><p class="note-footer">Sparas automatiskt och följer med i Word- och PDF-export.</p></section></div>`;}
-function catalogueView(){const p=catalog?.programmes.find(p=>p.id===filter.programme);return `<header class="heading"><div><p class="eyebrow">UTFORSKA MÖJLIGHETER</p><h1>Kursutbud</h1><p>Officiellt kursutbud från LTH · ${catalog?.academicYearLabel||'Kurskälla saknas'}</p></div><div class="actions"><button data-page="plan">← Till studieplanen</button><button data-action="custom-course">＋ Egen eller extern kurs</button></div></header>${studentCard()}<section class="catalog-layout"><aside class="catalog-filters panel"><h2>Avgränsa kursutbudet</h2><label for="course-search">Sök kursnamn, kurskod eller ämne</label><input id="course-search" type="search" placeholder="Till exempel design eller EDAF" value="${esc(filter.q)}"><label for="programme-filter">Program</label><select id="programme-filter"><option value="">Alla program</option>${(catalog?.programmes||[]).map(p=>`<option value="${esc(p.id)}" ${filter.programme===p.id?'selected':''}>${esc(p.code)} · ${esc(p.name)}</option>`).join('')}</select><label for="specialization-filter">Specialisering</label><select id="specialization-filter"><option value="">Alla specialiseringar</option>${(p?.specializations||[]).map(v=>`<option value="${esc(v.id)}" ${filter.specialization===v.id?'selected':''}>${esc(v.name)}</option>`).join('')}</select><label for="level-filter">Nivå</label><select id="level-filter"><option value="">Alla nivåer</option><option value="G" ${filter.level==='G'?'selected':''}>Grundnivå</option><option value="A" ${filter.level==='A'?'selected':''}>Avancerad nivå</option></select><label class="check-label"><input id="include-inactive" type="checkbox" ${filter.inactive?'checked':''}> Visa även vilande och inaktiva kurser</label><button class="text-button" data-action="reset-filters">Nollställ filter</button><hr><label for="catalog-month">Placera kursen med start i</label><input type="month" id="catalog-month" value="${selected}"><p class="note-footer">Månaden är ditt planeringsval. Kontrollera LTH:s kurstillfälle och schema innan planen fastställs.</p><p class="catalog-source">Hämtat ${catalog?.fetchedAt.slice(0,10)||'–'}<br><a href="${safeURL(catalog?.sourceUrl)}" target="_blank" rel="noopener">Öppna LTH:s kursutbud ↗</a></p></aside><section class="catalog-results-wrap" aria-label="Kursresultat"><div class="results-heading"><h2 id="result-count" role="status" aria-live="polite"></h2><span class="muted">Läs mer eller lägg till i planen</span></div><div id="catalog-results"></div></section></section>`;}
-function filteredCourses(){return (catalog?.courses||[]).filter(c=>{const offers=c.offerings.filter(o=>(!filter.programme||o.programmeId===filter.programme)&&(!filter.specialization||o.specialization===filter.specialization)&&(filter.inactive||o.status==='active'));return offers.length&&(!filter.level||c.level?.startsWith(filter.level))&&(!filter.q||`${c.code} ${c.title} ${c.department} ${c.purpose||''}`.toLocaleLowerCase('sv').includes(filter.q.toLocaleLowerCase('sv')));}).sort((a,b)=>a.title.localeCompare(b.title,'sv'));}
-function renderCatalogResults(){const host=document.querySelector('#catalog-results');if(!host)return;const list=filteredCourses();document.querySelector('#result-count').textContent=`${list.length} ${list.length===1?'kurs':'kurser'}`;host.innerHTML=list.slice(0,filter.limit).map(c=>{const offers=c.offerings.filter(o=>!filter.programme||o.programmeId===filter.programme),specs=[...new Set(offers.map(o=>o.specializationName).filter(Boolean))],inPlan=studentCourses().some(v=>v.code===c.code);return `<article class="catalog-course"><div class="catalog-course-top"><span class="code">${esc(c.code)}</span><span>${fmt(c.credits)} hp</span><span class="pill">${c.level?.startsWith('A')?'Avancerad nivå':c.level?.startsWith('G')?'Grundnivå':esc(c.level||'Nivå ej angiven')}</span>${c.status!=='active'?'<span class="pill inactive">Ej aktivt kurstillfälle</span>':''}</div><h3>${esc(c.title)}</h3><p class="course-purpose">${esc(String(c.purpose||c.contents||'').slice(0,230))}${String(c.purpose||c.contents||'').length>230?'…':''}</p><p class="catalog-meta">${esc(c.department)}${specs.length?' · '+esc(specs.slice(0,3).join(', ')):''}</p><div class="catalog-course-bottom"><button data-details="${esc(c.code)}">Innehåll och förkunskaper</button><button class="${inPlan?'':'primary'}" data-add-code="${esc(c.code)}">${inPlan?'Finns i planen · visa':'＋ Lägg till i planen'}</button></div></article>`;}).join('')||'<div class="panel empty-start"><h2>Inga kurser matchar ditt val</h2><p>Prova ett annat ord, välj alla specialiseringar eller nollställ filtren.</p><button data-action="reset-filters">Nollställ filter</button></div>';if(list.length>filter.limit)host.insertAdjacentHTML('beforeend','<button class="more-results" data-action="more-courses">Visa 20 fler kurser</button>');}
-function studentsView(){const removed=data.deletedStudents||[];return `<header class="heading"><div><h1>Studenter och alternativ</h1><p>Öppna, ändra eller ta bort en student och dess studieplan.</p></div><div class="actions"><button data-action="import">↑ Importera säkerhetskopia</button><button class="primary" data-action="new-student">＋ Ny student</button></div></header><div class="student-management">${data.students.map(s=>{const cs=data.courses.filter(c=>c.studentId===s.id);return `<article class="student-row"><button class="student-open" data-student="${esc(s.id)}"><b>${esc(s.name)}</b><small>${esc(s.program)} · ${esc(s.year)} · ${cs.length} kurser · ${fmt(summarize(cs).credits)} hp</small></button><div><button data-student-edit="${esc(s.id)}" aria-label="Redigera ${esc(s.name)}">Redigera</button><button class="danger-text" data-student-remove="${esc(s.id)}" aria-label="Ta bort ${esc(s.name)}">Ta bort</button></div></article>`;}).join('')||emptyStudents()}</div>${removed.length?`<details class="removed-students panel"><summary>Borttagna studenter (${removed.length})</summary><p class="note-footer">En borttagen student kan återställas här. Radera permanent tar även bort alla sparade kurser och anteckningar för studenten.</p>${removed.map(v=>`<article class="student-row"><div><b>${esc(v.student.name)}</b><small>${v.courses.length} kurser · borttagen ${v.deletedAt.slice(0,10)}</small></div><div><button data-student-restore="${esc(v.student.id)}">Återställ</button><button class="danger-text" data-student-purge="${esc(v.student.id)}">Radera permanent</button></div></article>`).join('')}</details>`:''}`;}
-function helpView(){return `<header class="heading"><div><h1>Så använder du studieplanen</h1><p>En gemensam arbetsyta inför nästa steg i studierna.</p></div></header><section class="panel help"><h2>Kom igång</h2><ol><li>Välj student eller skapa en ny under Studenter.</li><li>Öppna Kursutbud. Sök och filtrera på program, specialisering och nivå.</li><li>Läs kursinnehåll och förkunskaper. Välj Lägg till och ange egna planeringsdatum.</li><li>Dra en kurs till en månad för att flytta den. Du kan också klicka på kursen och välja Flytta till månad, med tangentbord eller på mobilen.</li><li>Exportera som Word eller PDF inför samtalet. JSON är en separat säkerhetskopia som kan läsas in igen.</li></ol><h2>Poäng och kursstatus</h2><p>Hp är högskolepoäng. Varje kurs räknas en gång i den period den överlappar; poängen fördelas inte mellan månader. Avklarad är en manuell markering, inte ett resultat hämtat från Ladok.</p><p>Poäng på avancerad nivå summeras bara för kurser med känd nivå som börjar på A i LTH:s underlag. Okänd nivå räknas inte som avancerad. Målet i studentuppgifterna är ditt eget planeringsmål. Sidan avgör inte om examen eller en specialisering är uppfylld.</p><h2>Kalender och sommar</h2><p>Kalenderår visar januari–december. Läsår visar augusti–juli. Hösttermin visar augusti–december och vårtermin januari–juni. Juni och juli markeras som sommar. Detta är månadsvyer och inte LTH:s officiella terminsgränser.</p><h2>Källor och lokalt sparande</h2><p>LTH:s kurskatalog ${catalog?.academicYearLabel||''} lagras som en daterad kopia, hämtad ${catalog?.fetchedAt.slice(0,10)||''}. LTH:s läsperioder visas endast i kursinformationen och omvandlas inte till exakta datum.</p><p>Studentuppgifter och planer sparas i den här webbläsaren. Inloggning, gemensam databas, Ladokimport och delning mellan enheter ingår inte. Ta en JSON-säkerhetskopia innan du byter webbläsare eller rensar data.</p><a href="${safeURL(catalog?.sourceUrl)}" target="_blank" rel="noopener">Officiellt kursutbud på LTH ↗</a></section>`;}
-function render(){document.querySelector('#app').innerHTML=`<aside class="sidebar"><div class="brand"><div class="mark" aria-hidden="true">▥</div><div><strong>Studieplan</strong><small>VÄGLEDNING OCH PLANERING</small></div></div><div><p class="overline">DIN ARBETSYTA</p><nav class="nav" aria-label="Huvudmeny">${[['plan','▦','Studieplanering'],['catalog','⌕','Kursutbud'],['students','♧','Studenter'],['help','?','Så fungerar det']].map(([p,icon,label])=>`<button data-page="${p}" class="${page===p?'active':''}" ${page===p?'aria-current="page"':''}><span aria-hidden="true">${icon}</span>${label}</button>`).join('')}</nav></div><div class="sidebar-footer"><div class="avatar">SV</div><div><b>Vägledarvy</b><small>Planera · utforska · följ upp</small></div></div></aside><main class="main" id="main"><div class="topbar"><span>Arbetsyta / <b>${{plan:'Studieplanering',catalog:'LTH:s kursutbud',students:'Studenter',help:'Hjälp'}[page]}</b></span><span><i class="dot"></i> ${storageError?'Sparning otillgänglig':'Sparas på den här enheten'}</span></div>${page==='plan'?(student()?planView():emptyStudents()):page==='catalog'?catalogueView():page==='students'?studentsView():helpView()}<footer class="footer"><span>Lokalt arbetsmaterial · ${catalog?.academicYearLabel||''} · ingen automatisk behörighets- eller examenskontroll.</span><span>STUDIEPLAN / VÄGLEDARVY</span></footer></main>`;if(page==='catalog')renderCatalogResults();}
-function openDialog(html){const d=document.querySelector('#editor');d.classList.remove('export-dialog');d.innerHTML=html;d.showModal();}
-function courseEditor(id,code){if(!student()){studentEditor();return;}const from=sourceCourse(code),existing=code&&studentCourses().find(c=>c.code===code);if(existing){courseEditor(existing.id);return;}let c=data.courses.find(c=>c.id===id);if(!c){const last=new Date(Number(selected.slice(0,4)),Number(selected.slice(5))+1,0,12).toLocaleDateString('sv-SE');c={id:'',title:from?.title||'',code:from?.code||'',credits:from?.credits||7.5,level:from?.level||'',start:selected+'-01',end:last,status:'planned',note:'',sourceUrl:from?.syllabusUrl||'',catalogYear:from?.academicYear||''};}openDialog(`<div class="dialog-head"><h2 id="editor-title">${c.id?'Redigera eller flytta kurs':'Lägg till kurs i planen'}</h2><button data-close aria-label="Stäng">✕</button></div><form id="course-form"><input type="hidden" name="courseId" value="${esc(c.id)}"><input type="hidden" name="sourceUrl" value="${esc(c.sourceUrl||'')}"><input type="hidden" name="catalogYear" value="${esc(c.catalogYear||'')}"><p class="form-intro">Datum är egna planeringsdatum. Kontrollera kursens faktiska erbjudande och schema på LTH.</p><label>Kursnamn<input name="title" value="${esc(c.title)}" required maxlength="150" autofocus></label><div class="form-grid"><label>Kurskod<input name="code" value="${esc(c.code)}" maxlength="40"></label><label>Högskolepoäng<input name="credits" type="number" min="0.1" max="120" step="0.1" value="${c.credits}" required></label><label>Planerad start<input name="start" type="date" value="${c.start}" required></label><label>Planerat slut<input name="end" type="date" value="${c.end}" required></label><label>Status<select name="status">${Object.entries(statuses).map(([key,label])=>`<option value="${key}" ${c.status===key?'selected':''}>${label}</option>`).join('')}</select></label><label>Nivå<select name="level">${['','G1','G2','A'].map(v=>`<option value="${v}" ${v===c.level?'selected':''}>${v||'Inte angiven'}</option>`).join('')}</select></label></div>${c.id?`<div class="move-control"><label>Flytta till månad<input name="moveMonth" type="month" value="${c.start.slice(0,7)}"></label><button type="button" data-action="apply-move">Flytta datumen</button><p>Flyttar både start och slut lika många månader.</p></div>`:''}<div class="form-grid"><label>Studietakt (%)<input name="studyRate" type="number" min="1" max="400" step="0.1" value="${c.studyRate??''}" placeholder="Tomt = beräknas från datum"></label><label>Avklarade poäng i kursen<input name="completedCredits" type="number" min="0" max="${c.credits}" step="0.1" value="${c.status==='done'?c.credits:(c.completedCredits||0)}"></label></div><p class="note-footer">Studietakten ändrar inte kursens HP. Ange avklarade delpoäng för att se vad som återstår.</p><label>Kursanteckning<textarea name="note" maxlength="5000">${esc(c.note)}</textarea></label>${c.sourceUrl?`<p class="note-footer"><a href="${safeURL(c.sourceUrl)}" target="_blank" rel="noopener">Officiell kursplan ↗</a></p>`:''}<p id="form-error" class="error" role="alert"></p><div class="dialog-actions">${c.id?`<button type="button" class="text-button" data-delete="${esc(c.id)}">Ta bort ur planen</button>`:''}<button type="button" data-close>Avbryt</button><button type="submit" class="primary">Spara kurs</button></div></form>`);}
-function studentEditor(edit=false,id=studentId){const s=edit?data.students.find(v=>v.id===id):{id:'',name:'',program:'',programmeId:'',year:'',targetCredits:60};openDialog(`<div class="dialog-head"><h2 id="editor-title">${edit?'Redigera student':'Ny student'}</h2><button data-close aria-label="Stäng">✕</button></div><form id="student-form"><input type="hidden" name="studentId" value="${esc(s.id)}"><label>Namn<input name="name" value="${esc(s.name)}" required maxlength="120" autofocus></label><label>LTH-program<select name="programmeId"><option value="">Annat program / egen utbildning</option>${(catalog?.programmes||[]).map(p=>`<option value="${esc(p.id)}" ${s.programmeId===p.id?'selected':''}>${esc(p.code)} · ${esc(p.name)}</option>`).join('')}</select></label><label>Utbildningens namn<input name="program" value="${esc(s.program)}" required maxlength="160"></label><div class="form-grid"><label>Årskurs / beskrivning<input name="year" value="${esc(s.year)}" maxlength="80"></label><label>Eget mål i hp<input name="targetCredits" type="number" min="1" max="1000" value="${s.targetCredits}" required></label></div><p class="note-footer">Programvalet styr kursfiltret. Befintliga kurser påverkas inte.</p><div class="dialog-actions"><button type="button" data-close>Avbryt</button><button type="submit" class="primary">Spara student</button></div></form>`);}
-function courseDetails(code){const c=sourceCourse(code);if(!c)return;const offers=c.offerings.filter(o=>!filter.programme||o.programmeId===filter.programme);openDialog(`<div class="dialog-head"><h2 id="editor-title">${esc(c.code)} · ${esc(c.title)}</h2><button data-close aria-label="Stäng">✕</button></div><div class="details-body"><p>${fmt(c.credits)} hp · ${esc(c.level)} · ${esc(c.language||'')}</p>${c.status!=='active'?'<p class="notice">Kursen är inte aktiv i katalogen. Kontrollera om ett kurstillfälle finns innan du planerar den.</p>':''}<h3>Syfte</h3><p>${esc(c.purpose||'Se den officiella kursplanen.')}</p><h3>Innehåll</h3><p>${esc(c.contents||'Se den officiella kursplanen.')}</p><h3>Antagningsuppgifter och förkunskaper</h3><p>${esc(c.prerequisites||c.admission||'Uppgift saknas i kopian. Läs den officiella kursplanen.')}</p><h3>Placering i LTH:s underlag</h3>${offers.map(o=>`<p>${esc(o.programmeId)} · ${o.year?'år '+o.year:'årskurs ej angiven'} · ${esc(o.specializationName||'Allmän inriktning')} · ${o.periods.length?'LTH läsperiod '+o.periods.join(', '):'läsperiod ej angiven'}${o.footnote?'<br>'+esc(o.footnote):''}</p>`).join('')}<p class="note-footer">Källmetadata ovan översätts inte till exakta planeringsdatum. Sidan avgör inte behörighet.</p><a href="${safeURL(c.syllabusUrl)}" target="_blank" rel="noopener">Öppna hela officiella kursplanen ↗</a>${c.timeeditUrl?`<p><a href="${safeURL(c.timeeditUrl)}" target="_blank" rel="noopener">Visa kursens schema i TimeEdit ↗</a></p>`:""}</div><div class="dialog-actions"><button data-close>Stäng</button><button class="primary" data-add-code="${esc(c.code)}">Lägg till i planen</button></div>`);}
-function exportDialog(){if(!student())return;openExportPanel({student:student(),courses:studentCourses(),periodCourses:shownCourses(),scope:`${labels[mode]} ${title()}`,catalog,saved:data.exportSettings,onSave:settings=>{data.exportSettings=settings;return save();},onBackup:()=>downloadFile(new Blob([JSON.stringify({version:2,students:data.students,courses:data.courses,exportSettings:data.exportSettings},null,2)],{type:'application/json'}),'Studieplanering-sakerhetskopia.json')});}
-function importBackup(){const input=document.createElement('input');input.type='file';input.accept='.json,application/json';input.onchange=async()=>{try{const file=input.files[0];if(!file)return;if(file.size>10000000)throw Error();const next=validateImport(JSON.parse(await file.text()));const map=new Map(next.students.map(s=>[s.id,uid()]));data.students.push(...next.students.map(s=>({...s,id:map.get(s.id),targetCredits:Number(s.targetCredits)||60})));data.courses.push(...next.courses.map(c=>({...c,id:uid(),studentId:map.get(c.studentId)})));save();render();toast('Planerna har lagts till. Befintliga planer finns kvar.');}catch{toast('Importen kunde inte läsas. Välj en giltig JSON-säkerhetskopia.');}};input.click();}
-function commitMove(id,month){const index=data.courses.findIndex(c=>c.id===id&&c.studentId===studentId);if(index<0)return;const old={...data.courses[index]};try{data.courses[index]=moveCourse(old,month);selected=month;save();render();toast(`Kursen flyttades till ${months[Number(month.slice(5))-1]} ${month.slice(0,4)}.`,()=>{const at=data.courses.findIndex(c=>c.id===old.id);if(at>=0)data.courses[at]=old;});}catch{toast('Kursen kunde inte flyttas.');}}
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.hasAttribute('data-close')){document.querySelector('#editor').close();return;}if(b.dataset.page){page=b.dataset.page;render();}if(b.dataset.mode){year=switchedYear(mode,b.dataset.mode,year,selected);mode=b.dataset.mode;render();}if(b.dataset.year){year+=Number(b.dataset.year);render();}if(b.dataset.month){selected=b.dataset.month;render();}if(b.dataset.view){view=b.dataset.view;render();}if(b.dataset.student){setStudent(b.dataset.student);page='plan';render();}if(b.dataset.edit)courseEditor(b.dataset.edit);if(b.dataset.details)courseDetails(b.dataset.details);if(b.dataset.addCode){document.querySelector('#editor').close();courseEditor(null,b.dataset.addCode);}if(b.dataset.complete){const c=data.courses.find(c=>c.id===b.dataset.complete),old=c.status,oldCompleted=c.completedCredits;c.status=c.status==='done'?'planned':'done';c.completedCredits=c.status==='done'?c.credits:0;save();render();toast(c.status==='done'?'Kursen är markerad som avklarad.':'Kursen är markerad som planerad.',()=>{c.status=old;c.completedCredits=oldCompleted;});}if(b.dataset.delete){const id=b.dataset.delete,c=data.courses.find(c=>c.id===id),i=data.courses.indexOf(c);data.courses.splice(i,1);save();document.querySelector('#editor').close();render();toast('Kursen togs bort ur planen.',()=>data.courses.splice(i,0,c));}
- switch(b.dataset.action){case'custom-course':courseEditor();break;case'new-student':studentEditor();break;case'edit-student':studentEditor(true);break;case'export':exportDialog();break;case'backup':downloadFile(new Blob([JSON.stringify({version:2,students:data.students,courses:data.courses,exportSettings:data.exportSettings},null,2)],{type:'application/json'}),'Studieplanering-sakerhetskopia.json');toast('Säkerhetskopian finns i hämtningar.');break;case'import':importBackup();break;case'reset-filters':filter={q:'',programme:'',specialization:'',level:'',inactive:false,limit:20};render();break;case'more-courses':filter.limit+=20;renderCatalogResults();break;case'apply-move':{const f=document.querySelector('#course-form'),v=Object.fromEntries(new FormData(f));try{const moved=moveCourse(v,v.moveMonth);f.elements.namedItem('start').value=moved.start;f.elements.namedItem('end').value=moved.end;document.querySelector('#form-error').textContent='Datum flyttade. Välj Spara kurs för att behålla ändringen.';}catch{document.querySelector('#form-error').textContent='Välj en giltig månad.';}break;}case'alternative':{const origin=student(),id=uid();data.students.push({...origin,id,name:origin.name+' – alternativ',originalPlanId:origin.id});data.courses.push(...studentCourses().map(c=>({...c,id:uid(),studentId:id})));setStudent(id);save();render();toast('Alternativet har skapats. Originalplanen finns kvar.');break;}}
-});
-document.addEventListener('change',e=>{const t=e.target;switch(t.id){case'student-select':setStudent(t.value);render();break;case'programme-filter':filter.programme=t.value;filter.specialization='';filter.limit=20;render();break;case'specialization-filter':filter.specialization=t.value;filter.limit=20;renderCatalogResults();break;case'level-filter':filter.level=t.value;filter.limit=20;renderCatalogResults();break;case'include-inactive':filter.inactive=t.checked;filter.limit=20;renderCatalogResults();break;case'catalog-month':if(/^\d{4}-\d{2}$/.test(t.value))selected=t.value;break;}if(t.name==='programmeId'&&t.closest('#student-form')){const p=catalog.programmes.find(p=>p.id===t.value);if(p)document.querySelector('#student-form').elements.namedItem('program').value=p.name;}});
-document.addEventListener('input',e=>{if(e.target.id==='student-note'){student().note=e.target.value;save();}if(e.target.id==='course-search'){filter.q=e.target.value;filter.limit=20;renderCatalogResults();}});
-document.addEventListener('submit',e=>{const kind=e.target.getAttribute('id');if(!['course-form','student-form'].includes(kind))return;e.preventDefault();const v=Object.fromEntries(new FormData(e.target));if(kind==='course-form'){const {courseId,moveMonth,...fields}=v,c={...fields,id:courseId||uid(),studentId,title:v.title.trim(),credits:Number(v.credits),datesArePlanning:true};c.studyRate=v.studyRate===''?undefined:Number(v.studyRate);c.completedCredits=Number(v.completedCredits)||0;const err=validateCourse(c);if(err){document.querySelector('#form-error').textContent=err;return;}const index=data.courses.findIndex(x=>x.id===c.id);if(index<0)data.courses.push(c);else data.courses[index]=c;}else{if(!v.name.trim()||!v.program.trim())return;const {studentId:formId,...fields}=v,s={...fields,id:formId||uid(),name:v.name.trim(),note:formId?data.students.find(s=>s.id===formId).note:'',targetCredits:Number(v.targetCredits)},index=data.students.findIndex(x=>x.id===s.id);if(index<0)data.students.push(s);else data.students[index]={...data.students[index],...s};setStudent(s.id);}const ok=save();document.querySelector('#editor').close();page='plan';render();if(ok)toast('Sparat på den här enheten.');});
+function sourcePlacement(course) {
+ if (!course.periods?.length) return '';
+ const termOnly = programmeStructure(course.programmeId,course.catalogYear).periods === 'terms';
+ return '<small>Källplacering: ' + esc(periodLabel(course.periods,termOnly)) + '</small>';
+}
+function courseList(courses){return `<div class="table-scroll"><table class="course-table"><thead><tr><th>Kurs</th><th>Hp</th><th>Planeringsdatum</th><th>Status</th><th>Ändra</th></tr></thead><tbody>${courses.map(c=>`<tr><td><b>${esc(c.title)}</b><small>${esc(c.code||'Egen kurs')} ${c.level?'· '+esc(c.level):''}</small>${sourcePlacement(c)}</td><td>${fmt(c.credits)}</td><td>${date(c.start)}<br>${date(c.end)}</td><td><span class="status-tag ${esc(c.status)}">${statuses[c.status]}</span></td><td><button data-edit="${esc(c.id)}">Redigera / flytta</button></td></tr>`).join('')||'<tr><td colspan="5">Inga kurser i perioden. Välj Lägg till kurs för att börja.</td></tr>'}</tbody></table></div>`;}
+function planningOverview(){const courses=shownCourses();if(!courses.length)return '';const total=courses.reduce((n,c)=>n+c.credits,0),completed=courses.reduce((n,c)=>n+(c.status==='done'?c.credits:Math.min(c.credits,Math.max(0,Number(c.completedCredits)||0))),0);return `<details class="planning-facts panel"><summary>Studietakt och återstående poäng · ${fmt(total-completed)} hp kvar i vald period</summary><p>Heltid motsvarar 1,5 hp per vecka. Kursens HP är oförändrade även om du planerar att läsa den på deltid. Angiven studietakt visas utan asterisk; annars uppskattas den från kursens HP och hela datumintervallet.</p><div class="table-scroll"><table class="course-table"><thead><tr><th>Kurs</th><th>HP</th><th>Avklarat</th><th>Kvar</th><th>Studietakt</th><th>Veckor kvar vid denna takt</th></tr></thead><tbody>${courses.map(c=>{const done=c.status==='done'?c.credits:Math.min(c.credits,Math.max(0,Number(c.completedCredits)||0)),pace=coursePace(c),weeks=pace.value>0?(c.credits-done)/(1.5*pace.value/100):0;return `<tr><td><button class="text-button" data-edit="${esc(c.id)}">${esc(c.title)}</button></td><td>${fmt(c.credits)}</td><td>${fmt(done)}</td><td>${fmt(c.credits-done)}</td><td>${pace.value}%${pace.manual?'':'*'}</td><td>${fmt(Math.round(weeks*10)/10)}</td></tr>`;}).join('')}</tbody></table></div><p class="note-footer">En planeringsuppskattning, inte schema eller beslut om studiemedel. <a href="https://www.lu.se/node/35041" target="_blank" rel="noopener">LU:s information om högskolepoäng och heltid ↗</a></p></details>`;}
+function planView(){const s=activeCase(),r=range();if(!r.some(m=>m.key===selected))selected=r[0].key;const courses=shownCourses(),summary=summarize(courses),whole=summarize(activeCourses()),chosen=r.find(m=>m.key===selected),inMonth=courses.filter(c=>intersects(c,chosen));return `<header class="heading"><div><p class="eyebrow">AKTIVT ÄRENDE</p><h1>Studieplanering</h1><p>Utforska kurser, prova alternativ och planera nästa steg.</p></div><div class="actions"><button data-action="export">↓ Exportera</button><button class="primary" data-page="catalog">＋ Lägg till kurs</button></div></header>${caseCard()}${calendarPanel(s, mode==='spring' ? year-1 : year)}<section class="stats" aria-label="Poängöversikt"><div class="stat"><label>Kurser i vald period</label><strong>${fmt(summary.credits)} <span>hp</span></strong><p>${courses.length} kurser · ${labels[mode].toLowerCase()} ${title()}</p></div><div class="stat"><label>Avklarat i hela planen</label><strong>${fmt(whole.done)} <span>av ${fmt(s.targetCredits)} hp i eget mål</span></strong><progress value="${whole.done}" max="${s.targetCredits}" aria-label="Avklarade poäng mot eget mål"></progress><p>Målet ändras under Ändra grundinformation.</p></div><div class="stat"><label>Avancerad nivå i vald period</label><strong>${fmt(summary.advanced)} <span>hp med känd A-nivå</span></strong><p><button class="text-button compact" data-page="help">Hur räknas poäng och mål? ↗</button></p></div></section>${storageError?'<p class="notice">Lokal sparning är otillgänglig. Exportera en säkerhetskopia.</p>':''}${planningOverview()}<section class="planning" aria-label="Studieplanens tidslinje"><div class="planning-head"><div><h2>Studieplanen</h2><p>Dra en kurs till en månad eller klicka för att redigera och flytta.</p></div><div class="segmented" aria-label="Välj tidsperiod">${Object.entries(labels).map(([key,label])=>`<button data-mode="${key}" aria-pressed="${mode===key}" class="${mode===key?'active':''}">${label}</button>`).join('')}</div></div><div class="controls"><div class="year-selector"><button data-year="-1" aria-label="Föregående år">←</button><strong>${title()}</strong><button data-year="1" aria-label="Nästa år">→</button></div><div class="segmented view-switch" aria-label="Visningssätt"><button data-view="timeline" class="${view==='timeline'?'active':''}" aria-pressed="${view==='timeline'}">▦ Tidslinje</button><button data-view="list" class="${view==='list'?'active':''}" aria-pressed="${view==='list'}">☷ Kurslista</button></div></div><div class="plan-timeline">${view==='timeline'?timeline(courses,r):courseList(courses)}</div><div class="plan-mobile-list">${courseList(courses)}</div><div class="planning-foot"><span>Egna planeringsdatum · juni och juli markeras som sommar.</span><button class="text-button compact" data-action="custom-course">＋ Skapa egen kurs</button></div></section><div class="lower"><section class="panel"><div class="panel-head"><h2>${months[chosen.month]} ${chosen.year}</h2><button data-page="catalog">＋ Lägg till kurs</button></div><p class="month-summary">${inMonth.length} kurser överlappar den här månaden.</p>${inMonth.map(c=>`<div class="course-item"><span class="mini-dot"></span><div><b>${esc(c.title)}</b><small>${date(c.start)} – ${date(c.end)} · ${statuses[c.status]}</small></div><button data-complete="${esc(c.id)}">${c.status==='done'?'Markera som planerad':'Markera som avklarad'}</button><button data-edit="${esc(c.id)}" aria-label="Öppna ${esc(c.title)}">↗</button></div>`).join('')||'<p class="empty">Välj en kurs i kursutbudet och placera den här. Du kan ändra senare.</p>'}<p class="note-footer">Kursens hela poäng räknas en gång. Överlapp betyder inte automatiskt schemakrock.</p></section><section class="panel"><div class="panel-head"><h2>Anteckningar och nästa steg</h2></div><label class="sr-only" for="case-note">Vägledningsanteckningar</label><textarea class="note-area" id="case-note" maxlength="1000" aria-describedby="note-privacy" placeholder="Kort nästa steg för planeringen">${esc(s.note)}</textarea><p class="note-footer" id="note-privacy">${casePrivacy} Anteckningen sparas lokalt och kan följa med i export.</p></section></div>`;}
+function courseEditor(id,code){if(!activeCase()){ openDialog(caseForm(catalog,null,defaultYear)); return; }const from=sourceCourse(code),existing=code&&activeCourses().find(c=>c.code===code);if(existing){courseEditor(existing.id);return;}let c=activeCourses().find(c=>c.id===id);if(!c){const last=monthEnd(selected);c={id:'',title:from?.title||'',code:from?.code||'',credits:from?.credits||7.5,level:from?.level||'',start:selected+'-01',end:last,status:'planned',note:'',sourceUrl:from?.syllabusUrl||'',catalogYear:from?.academicYear||''};}openDialog(`<div class="dialog-head"><h2 id="editor-title">${c.id?'Redigera eller flytta kurs':'Lägg till kurs i planen'}</h2><button data-close aria-label="Stäng">✕</button></div><form id="course-form"><input type="hidden" name="courseId" value="${esc(c.id)}"><input type="hidden" name="programmeId" value="${esc(id ? c.programmeId : filter.programme)}"><input type="hidden" name="catalogYear" value="${esc(c.catalogYear||'')}"><p class="form-intro">Datum är egna planeringsdatum. Kontrollera kursens faktiska erbjudande och schema på LTH.</p>${from ? `<p>Källplacering: ${esc(periodLabel([...new Set(from.offerings.filter(o=>o.programmeId===filter.programme).flatMap(o=>o.periods))].sort(), programmeStructure(filter.programme,catalog.academicYear).periods==='terms'))}</p>` : ''}<label>Kursnamn<input name="title" value="${esc(c.title)}" required maxlength="150" autofocus></label><div class="form-grid"><label>Kurskod<input name="code" value="${esc(c.code)}" maxlength="40"></label><label>Högskolepoäng<input name="credits" type="number" min="0.1" max="120" step="0.1" value="${c.credits}" required></label><label>Planerad start<input name="start" type="date" value="${c.start}" required></label><label>Planerat slut<input name="end" type="date" value="${c.end}" required></label><label>Status<select name="status">${Object.entries(statuses).map(([key,label])=>`<option value="${key}" ${c.status===key?'selected':''}>${label}</option>`).join('')}</select></label><label>Nivå<select name="level">${[...new Set(['','G1','G2','A',c.level].filter(v=>v!=null))].map(v=>`<option value="${v}" ${v===c.level?'selected':''}>${v||'Inte angiven'}</option>`).join('')}</select></label></div>${c.id?`<div class="move-control"><label>Flytta till månad<input name="moveMonth" type="month" value="${c.start.slice(0,7)}"></label><button type="button" data-action="apply-move">Flytta datumen</button><p>Flyttar både start och slut lika många månader.</p></div>`:''}<div class="form-grid"><label>Studietakt (%)<input name="studyRate" type="number" min="1" max="400" step="0.1" value="${c.studyRate??''}" placeholder="Tomt = beräknas från datum"></label><label>Avklarade poäng i kursen<input name="completedCredits" type="number" min="0" max="${c.credits}" step="0.1" value="${c.status==='done'?c.credits:(c.completedCredits||0)}"></label></div><p class="note-footer">Studietakten ändrar inte kursens HP. Ange avklarade delpoäng för att se vad som återstår.</p><label>Avidentifierad kursanteckning <small>${casePrivacy}</small><textarea name="note" maxlength="1000">${esc(c.note)}</textarea></label>${c.sourceUrl?`<p class="note-footer">${officialLink(c.sourceUrl,"Officiell kursplan")}</p>`:''}<p id="form-error" class="error" role="alert"></p><div class="dialog-actions">${c.id?`<button type="button" class="text-button" data-delete="${esc(c.id)}">Ta bort ur planen</button>`:''}<button type="button" data-close>Avbryt</button><button type="submit" class="primary">Spara kurs</button></div></form>`);}
+function commitMove(id,month){const index=data.courses.findIndex(c=>c.id===id&&c.caseId===data.activeCaseId);if(index<0)return;const old={...data.courses[index]};try{data.courses[index]=moveCourse(old,month);selected=month;save(true);render();toast(`Kursen flyttades till ${months[Number(month.slice(5))-1]} ${month.slice(0,4)}.`,()=>{const at=data.courses.findIndex(c=>c.id===old.id);if(at>=0){data.courses[at]=old;const record=data.cases.find(c=>c.id===old.caseId);if(record)record.updatedAt=new Date().toISOString();};});}catch{toast('Kursen kunde inte flyttas.');}}
 document.addEventListener('dragstart',e=>{const el=e.target.closest('[data-drag-course]');if(!el)return;dragged={id:el.dataset.dragCourse};e.dataTransfer.setData('text/plain',JSON.stringify(dragged));e.dataTransfer.effectAllowed='move';document.body.classList.add('dragging-course');});
 document.addEventListener('dragover',e=>{const target=e.target.closest('[data-drop-month]');if(target&&dragged){e.preventDefault();document.querySelectorAll('.drop-active').forEach(el=>el.classList.remove('drop-active'));target.classList.add('drop-active');e.dataTransfer.dropEffect='move';}});
 document.addEventListener('drop',e=>{const target=e.target.closest('[data-drop-month]');if(!target||!dragged)return;e.preventDefault();const moved=dragged;dragged=null;document.body.classList.remove('dragging-course');commitMove(moved.id,target.dataset.dropMonth);});
@@ -56,9 +99,363 @@ document.addEventListener('pointerup',e=>{if(!pointerDrag)return;const active=po
 document.addEventListener('pointercancel',clearPointerDrag);
 document.addEventListener('click',e=>{if(performance.now()<suppressClicksUntil){e.preventDefault();e.stopImmediatePropagation();}},true);
 
-function emptyStudents(){return `<section class="panel empty-start"><h2>Skapa en student för att börja</h2><p>Lägg till namn och utbildning. Sedan kan du välja kurser och bygga en plan.</p><button class="primary" data-action="new-student">＋ Ny student</button><button data-action="import">Importera säkerhetskopia</button></section>`;}
-function confirmStudentRemoval(id,permanent=false){const s=permanent?(data.deletedStudents||[]).find(v=>v.student.id===id)?.student:data.students.find(v=>v.id===id);if(!s)return;const count=permanent?(data.deletedStudents.find(v=>v.student.id===id).courses.length):data.courses.filter(c=>c.studentId===id).length;openDialog(`<div class="dialog-head"><h2 id="editor-title">${permanent?'Radera permanent':'Ta bort student'}</h2><button data-close aria-label="Stäng">✕</button></div><p class="removal-description"><b>${esc(s.name)}</b> har ${count} kurser. ${permanent?'Studentens plan, kurser och anteckningar raderas från denna webbläsare. Det går inte att ångra.':'Studenten flyttas till Borttagna studenter tillsammans med sina kurser och anteckningar. Du kan återställa senare.'}</p><div class="dialog-actions"><button data-close>Avbryt</button><button class="danger" ${permanent?'data-confirm-student-purge':'data-confirm-student-remove'}="${esc(id)}">${permanent?'Radera permanent':'Ta bort student'}</button></div>`);}
-function planningOverview(){const courses=shownCourses();if(!courses.length)return '';const total=courses.reduce((n,c)=>n+c.credits,0),completed=courses.reduce((n,c)=>n+(c.status==='done'?c.credits:Math.min(c.credits,Math.max(0,Number(c.completedCredits)||0))),0);return `<details class="planning-facts panel"><summary>Studietakt och återstående poäng · ${fmt(total-completed)} hp kvar i vald period</summary><p>Heltid motsvarar 1,5 hp per vecka. Kursens HP är oförändrade även om du planerar att läsa den på deltid. Angiven studietakt visas utan asterisk; annars uppskattas den från kursens HP och hela datumintervallet.</p><div class="table-scroll"><table class="course-table"><thead><tr><th>Kurs</th><th>HP</th><th>Avklarat</th><th>Kvar</th><th>Studietakt</th><th>Veckor kvar vid denna takt</th></tr></thead><tbody>${courses.map(c=>{const done=c.status==='done'?c.credits:Math.min(c.credits,Math.max(0,Number(c.completedCredits)||0)),pace=coursePace(c),weeks=pace.value>0?(c.credits-done)/(1.5*pace.value/100):0;return `<tr><td><button class="text-button" data-edit="${esc(c.id)}">${esc(c.title)}</button></td><td>${fmt(c.credits)}</td><td>${fmt(done)}</td><td>${fmt(c.credits-done)}</td><td>${pace.value}%${pace.manual?'':'*'}</td><td>${fmt(Math.round(weeks*10)/10)}</td></tr>`;}).join('')}</tbody></table></div><p class="note-footer">En planeringsuppskattning, inte schema eller beslut om studiemedel. <a href="https://www.lu.se/node/35041" target="_blank" rel="noopener">LU:s information om högskolepoäng och heltid ↗</a></p></details>`;}
-document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.dataset.studentEdit)studentEditor(true,b.dataset.studentEdit);if(b.dataset.studentRemove)confirmStudentRemoval(b.dataset.studentRemove);if(b.dataset.studentPurge)confirmStudentRemoval(b.dataset.studentPurge,true);if(b.dataset.studentRestore){try{data=restoreStudentPlan(data,b.dataset.studentRestore);save();render();toast('Studenten och studieplanen har återställts.');}catch(error){toast(error.message);}}if(b.dataset.confirmStudentRemove){const id=b.dataset.confirmStudentRemove;data=removeStudentPlan(data,id);if(studentId===id){studentId=data.students[0]?.id||null;filter.programme=student()?.programmeId||'';}save();document.querySelector('#editor').close();page='students';render();toast('Studenten flyttades till Borttagna studenter.',()=>{data=restoreStudentPlan(data,id);});}if(b.dataset.confirmStudentPurge){data=purgeStudentPlan(data,b.dataset.confirmStudentPurge);save();document.querySelector('#editor').close();render();toast('Studenten har raderats permanent.');}});
+
+const nav = [['cases','▤','Mina studieplaneringar'],['plan','▦','Studieplanering'],['catalog','⌕','LTH:s kurskatalog'],['help','?','Så fungerar det']];
+const dialog = document.querySelector('#editor');
+
+function helpPage() {
+ return `<header class="heading"><h1>Så fungerar det</h1></header><section class="panel help">
+ <h2>Arbeta med ett ärende</h2><ol><li>Skapa en studieplanering och ange program, årskurs och planeringsläsår.</li>
+ <li>Öppna en kurs i LTH:s kurskatalog för att läsa källuppgifterna och lägga till den.</li>
+ <li>Dra kursen till en månad eller öppna kursen och ändra datumen.</li>
+ <li>Exportera Word eller PDF. Använd JSON om du vill spara en namnfri säkerhetskopia.</li></ol>
+ <h2>Kursutbud och antagningskull</h2><p>Antagningskullen anger när utbildningen påbörjades. Kursutbudet har ett eget källäsår. Kontrollera kraven i utbildningsplanen för antagningskullen.</p>
+ <p>LP anger placering i LoT. Kursens HP räknas en gång i vald vy och fördelas inte mellan perioderna. Avklarad är en manuell markering.</p>
+ <h2>Lokal lagring och dokument</h2><p>${casePrivacy} Namnfria uppgifter kan identifiera någon i kombination. Planerna synkas inte och kan försvinna när webbläsardata rensas.</p>
+ <p>Studentens namn kan anges i exportdialogen och rensas efter export eller när dialogen stängs. Dokumenten använder den befintliga mallen.</p>
+ <p>Kontrollera resultat i Ladok, examenskrav i utbildningsplanen, studiemedel hos CSN och schema i TimeEdit.</p>
+ ${officialLink(catalog.sourceUrl,'Officiellt kursutbud på LTH')}</section>`;
+}
+
+function renderCatalog() {
+ const host = document.querySelector('#catalog-results');
+ if (host) host.innerHTML = catalogResults(catalog,filter);
+}
+
+function render(focusHeading = false) {
+ const navLabel = nav.find(([key]) => key === page)[2];
+ const emptyPlan = '<section class="panel empty-start"><h1>Ingen öppen studieplanering</h1><p>Öppna ett tidigare ärende eller skapa ett nytt.</p><button class="primary" data-action="new-case">＋ Ny studieplanering</button><button data-page="cases">Mina studieplaneringar</button></section>';
+ document.querySelector('#app').innerHTML = `<aside class="sidebar"><div class="brand"><div class="mark" aria-hidden="true">▥</div><div><strong>Studieplanering LTH</strong><small>ARBETSVERKTYG FÖR PERSONAL</small></div></div>
+ <nav class="nav" aria-label="Huvudmeny">${nav.map(([key,icon,label]) => `<button data-page="${key}" class="${page === key ? 'active' : ''}" ${page === key ? 'aria-current="page"' : ''}><span aria-hidden="true">${icon}</span>${label}</button>`).join('')}</nav></aside>
+ <main class="main" id="main" tabindex="-1"><div class="topbar"><span>${navLabel}${activeCase() && page !== 'plan' ? ' · ' + esc(caseTitle(activeCase())) : ''}</span><span id="save-status" role="status">${saveLabel()}</span></div>
+ ${readError ? '<p class="notice" role="alert">Sparade ärenden kunde inte läsas. Lagringen skrivs inte över. Välj Rensa alla lokala ärenden om du vill börja om.</p>' : storageError ? '<p class="notice" role="alert">Sparning misslyckades. Om appen är öppen i flera flikar kan lagringen ha ändrats. Säkerhetskopiera arbetsytan som JSON innan du laddar om.</p>' : ''}
+ ${page === 'cases' ? casesPage(data,catalog,legacy,legacyExpanded) : page === 'catalog' ? catalogPage(catalog,filter,activeCase(),selected) : page === 'plan' ? (activeCase() ? planView() : emptyPlan) : helpPage()}
+ <footer class="footer">Planeringsunderlag för LTH-personal · kursutbud ${catalog.academicYearLabel}</footer></main>`;
+ renderCatalog();
+ if (focusHeading) {
+  const heading = document.querySelector('main h1');
+  heading.tabIndex = -1;
+  heading.focus();
+ }
+}
+
+function openDialog(html) {
+ dialog.innerHTML = html;
+ if (!dialog.open) dialog.showModal();
+ else (dialog.querySelector('[autofocus]') || dialog.querySelector('button'))?.focus();
+}
+dialog.addEventListener('close', () => {
+ if (!dialog.open) dialog.replaceChildren();
+ migrationGroups = null;
+ pendingCourse = null;
+});
+
+function exportJSON(id) {
+ try {
+  const backup = caseBackup(data,id,catalog);
+  downloadFile(new Blob([JSON.stringify(backup,null,2)],{type:'application/json'}),
+   id ? 'Studieplanering-arende.json' : 'Studieplanering-alla-arenden.json');
+ } catch (error) { toast(error.message); }
+}
+
+function exportDialog() {
+ const record = activeCase();
+ if (!record) return;
+ const neutral = { name:'', program:caseProgram(record,catalog)?.name || 'Program ej valt',
+  programmeId:record.programmeId, year:record.studyYear ? 'Årskurs '+record.studyYear : '', note:record.note };
+ openExportPanel({ student:neutral, courses:activeCourses(), periodCourses:shownCourses(),
+  scope:labels[mode]+' '+title(), catalog, saved:data.exportSettings,
+  onSave: settings => { data.exportSettings = exportPreferences(settings); return save(); },
+  onBackup: () => exportJSON(record.id) });
+}
+
+function importBackup() {
+ const input = document.createElement('input');
+ input.type = 'file';
+ input.accept = '.json,application/json';
+ input.onchange = async () => {
+  const file = input.files[0];
+  if (!file) return;
+  try {
+   if (file.size > 10000000) throw new Error();
+   const backup = JSON.parse(await file.text());
+   if (Array.isArray(backup?.students)) { reviewLegacy(backup,false); return; }
+   data = importCases(data,backup,catalog);
+   const ok = save();
+   render(true);
+   toast(ok ? 'Ärendena har importerats.' : 'Ärendena öppnades i arbetsytan. Sparning misslyckades.');
+  } catch { toast('Importen misslyckades. Välj en giltig JSON-säkerhetskopia.'); }
+ };
+ input.click();
+}
+
+function maskLegacyNames(value, groups) {
+ let result = String(value).slice(0,20000);
+ for (const { profile } of groups) {
+  const name = typeof profile.name === 'string' ? profile.name.trim() : '';
+  if (!name) continue;
+  const literal = name.replace(/[.*+?^${}()|[\]\\]/g,'\\function reviewLegacy(backup, local = true) {');
+  result = result.replace(new RegExp(literal,'gi'),'[namn borttaget]');
+ }
+ return result;
+}
+
+function reviewLegacy(backup, local = true) {
+ try {
+  migrationGroups = legacyChoices(local ? JSON.parse(legacy) : backup);
+  if (!migrationGroups.length) throw new Error();
+ } catch { toast('Inga äldre planer kunde läsas. Ursprungliga uppgifter finns kvar.'); return; }
+ openDialog(`<div class="dialog-head"><h2 id="editor-title">Granska äldre planer</h2><button data-close aria-label="Stäng">✕</button></div>
+ <form id="migration-form"><p>Välj vilka planer som ska kopieras. Namn och äldre anteckningar förs inte över automatiskt. Egna kurstitlar ersätts med en neutral titel. Granska äldre fritext och skriv en ny anteckning vid behov.</p>
+ ${migrationGroups.map(({profile,courses,archived},i) => `<fieldset class="migration-choice">
+ <legend>Plan ${i+1}${archived ? ' · tidigare borttagen' : ''}${profile.originalPlanId ? ' · alternativ' : ''}</legend>
+ <label><input type="checkbox" name="plan" value="${i}"> Konvertera ${esc(caseProgram(profile,catalog)?.name || 'program ej valt')} · ${courses.length} kurser</label>
+ ${profile.note ? '<details><summary>Granska tidigare anteckning</summary><p class="preserve-lines">' + esc(maskLegacyNames(profile.note,migrationGroups)) + '</p></details>' : ''}
+ <label>Ny avidentifierad anteckning (valfritt)<textarea name="review-${i}" maxlength="1000" placeholder="${casePrivacy}"></textarea></label></fieldset>`).join('')}
+ <p class="note-footer">Originalet ligger kvar. Kontrollera kurserna efter konvertering. Ogiltiga poster och dubbletter förs inte över.</p>
+ <p id="form-error" role="alert" class="error"></p><div class="dialog-actions"><button type="button" data-close>Avbryt</button><button class="primary" type="submit">Konvertera valda planer</button></div></form>`);
+}
+
+function confirmAction(titleText, description, callback, typed = false) {
+ openDialog(`<div class="dialog-head"><h2 id="editor-title">${titleText}</h2><button data-close aria-label="Stäng">✕</button></div>
+ <form id="confirm-action"><p>${description}</p>${typed ? '<label>Skriv RENSA för att fortsätta<input name="confirmation" pattern="RENSA" required autocomplete="off"></label>' : ''}
+ <div class="dialog-actions"><button type="button" data-close autofocus>Avbryt</button><button class="danger" type="submit">Bekräfta borttagning</button></div></form>`);
+ dialog.querySelector('#confirm-action').onsubmit = event => {
+  event.preventDefault();
+  if (callback()) { dialog.close(); render(true); }
+ };
+}
+
+function deleteCase(id) {
+ confirmAction('Ta bort ärendet?', 'Kurser och anteckningar för ärendet tas bort från den här webbläsaren.', () => {
+  const before = data;
+  data = { ...data, cases:data.cases.filter(c => c.id !== id), courses:data.courses.filter(c => c.caseId !== id),
+   activeCaseId:data.activeCaseId === id ? null : data.activeCaseId };
+  if (!save()) { data = before; toast('Ärendet kunde inte tas bort från lokal lagring.'); return false; }
+  page = 'cases';
+  toast('Ärendet har tagits bort.');
+  return true;
+ });
+}
+
+function clearCases() {
+ confirmAction('Rensa alla lokala ärenden?', 'Alla ärenden i den nya arbetsytan raderas. Äldre planer hanteras i migrationsrutan.', () => {
+  try { storage.removeItem(CASE_KEY); }
+  catch { toast('Den lokala lagringen kunde inte rensas.'); return false; }
+  data = emptyWorkspace();
+  lastSaved = null;
+  readError = false;
+  storageError = false;
+  setActive(null);
+  page = 'cases';
+  return true;
+ }, true);
+}
+
+function copyCase(id) {
+ const original = data.cases.find(c => c.id === id);
+ if (!original) return;
+ const now = new Date().toISOString();
+ const copy = { ...original, id:newId(), createdAt:now, updatedAt:now, alternative:true };
+ data.cases.push(copy);
+ data.courses.push(...data.courses.filter(c => c.caseId === id).map(c => ({ ...c,id:newId(),caseId:copy.id })));
+ setActive(copy.id);
+ page = 'plan';
+ save();
+ render(true);
+}
+
+function updateCourse(form, values) {
+ const { courseId, moveMonth, ...fields } = values;
+ const previous = activeCourses().find(c => c.id === courseId);
+ const code = values.code.trim().toUpperCase();
+ const official = sourceCourse(code);
+ const fromCatalog = official && values.catalogYear === catalog.academicYear && (!previous || previous.code === code);
+ const course = { ...fields, id:previous?.id || newId(), caseId:data.activeCaseId, title:values.title.trim(),
+  code, credits:Number(values.credits), datesArePlanning:true,
+  catalogYear:fromCatalog ? values.catalogYear : '', programmeId:fromCatalog ? values.programmeId : '',
+  studyRate:values.studyRate === '' ? undefined : Number(values.studyRate), completedCredits:Number(values.completedCredits) || 0 };
+ const duplicate = code && activeCourses().some(c => c.code.toUpperCase() === code && c.id !== course.id);
+ const error = validateCourse(course) || (duplicate ? 'Kurskoden finns redan i ärendet. Redigera den befintliga kursen.' : '');
+ if (error) { form.querySelector('#form-error').textContent = error; return; }
+ const offers = fromCatalog ? official.offerings.filter(o => o.programmeId === course.programmeId) : [];
+ course.sourceUrl = fromCatalog ? official.syllabusUrl : '';
+ course.periods = [...new Set(offers.flatMap(o => o.periods))].sort();
+ course.timePlans = offers.flatMap(o => o.timePlans);
+ if (previous) data.courses[data.courses.indexOf(previous)] = course;
+ else data.courses.push(course);
+ selected = course.start.slice(0,7);
+ if (!range().some(m => m.key === selected)) { mode = 'academic'; year = Number(selected.slice(0,4)) - (Number(selected.slice(5)) < 8 ? 1 : 0); }
+ page = 'plan';
+ const ok = save(true);
+ dialog.close();
+ render(true);
+ if (ok) toast('Kursen har sparats.');
+}
+
+function updateCase(values) {
+ const editing = dialog.querySelector('#editor-title').textContent === 'Ändra grundinformation';
+ const old = editing ? activeCase() : null;
+ const now = new Date().toISOString();
+ const record = cleanCase({ id:old?.id || newId(), createdAt:old?.createdAt || now, updatedAt:now,
+  programmeId:values.programmeId, admissionYear:Number(values.admissionYear) || null,
+  studyYear:Number(values.studyYear) || null, planningYear:Number(values.planningYear), targetCredits:Number(values.targetCredits),
+  note:old?.note || '', alternative:old?.alternative || false });
+ if (old && (old.programmeId !== record.programmeId || old.planningYear !== record.planningYear) &&
+  !window.confirm('Behålla befintliga kurser och markera kurskopplingar som behöver kontrolleras?')) return;
+ if (old) data.cases[data.cases.indexOf(old)] = record;
+ else data.cases.push(record);
+ const course = pendingCourse;
+ pendingCourse = null;
+ setActive(record.id);
+ page = course ? 'catalog' : 'plan';
+ save();
+ if (course) { filter.programme = record.programmeId || course.programme; courseEditor(null,course.code); }
+ else dialog.close();
+ render(true);
+}
+
+function submitMigration(fields, values) {
+ const indices = fields.getAll('plan').map(Number).sort((a,b)=>a-b);
+ if (!indices.length) throw new Error('Välj minst en plan.');
+ const migrated = migrateLegacy(migrationGroups,new Set(indices),catalog,new Date().toISOString(),defaultYear);
+ const names = migrationGroups.map(group => group.profile.name).filter(name => typeof name === 'string' && name.trim());
+ migrated.cases.forEach((c,i) => {
+  const note = values['review-'+indices[i]].trim();
+  if (names.some(name => note.toLocaleLowerCase('sv').includes(name.trim().toLocaleLowerCase('sv')))) throw new Error('Ta bort namnet ur anteckningen innan du fortsätter.');
+  c.note = note;
+ });
+ data.cases.push(...migrated.cases);
+ data.courses.push(...migrated.courses);
+ const ok = save();
+ dialog.close();
+ page = 'cases';
+ render(true);
+ toast(ok ? `${migrated.cases.length} ärenden och ${migrated.courses.length} kurser har konverterats.` : 'Planerna konverterades i arbetsytan. Sparning misslyckades.');
+}
+
+document.addEventListener('submit', event => {
+ const form = event.target;
+ if (!['case-form','course-form','migration-form'].includes(form.id)) return;
+ event.preventDefault();
+ const fields = new FormData(form);
+ const values = Object.fromEntries(fields);
+ try {
+  if (form.id === 'course-form') updateCourse(form,values);
+  if (form.id === 'case-form') updateCase(values);
+  if (form.id === 'migration-form') submitMigration(fields,values);
+ } catch (error) { form.querySelector('#form-error').textContent = error.message; }
+});
+
+function changeCourse(id, remove) {
+ const course = activeCourses().find(c => c.id === id);
+ if (!course) return;
+ const old = { ...course };
+ if (remove) { data.courses = data.courses.filter(c => c.id !== course.id); dialog.close(); }
+ else {
+  course.status = course.status === 'done' ? 'planned' : 'done';
+  course.completedCredits = course.status === 'done' ? course.credits : 0;
+ }
+ save(true);
+ render(true);
+ toast(remove ? 'Kursen togs bort ur planen.' : 'Kursstatus har ändrats.', () => {
+  const record = data.cases.find(c => c.id === old.caseId);
+  if (!record) return;
+  const index = data.courses.findIndex(c => c.id === old.id);
+  if (index >= 0) data.courses[index] = old;
+  else if (!old.code || !data.courses.some(c => c.caseId === old.caseId && c.code === old.code)) data.courses.push(old);
+  record.updatedAt = new Date().toISOString();
+ });
+}
+
+document.addEventListener('click', event => {
+ const button = event.target.closest('button');
+ if (!button) return;
+ const b = button.dataset;
+ if ('close' in b) { dialog.close(); return; }
+ if (b.page) { page = b.page; render(true); return; }
+ if (b.caseOpen) { setActive(b.caseOpen); page = 'plan'; save(); render(true); return; }
+ if (b.caseCopy) { copyCase(b.caseCopy); return; }
+ if (b.caseDelete) { deleteCase(b.caseDelete); return; }
+ if (b.caseBackup) { exportJSON(b.caseBackup); return; }
+ if (b.mode) { year = switchedYear(mode,b.mode,year,selected); mode = b.mode; render(); document.querySelector('[data-mode="'+mode+'"]')?.focus(); return; }
+ if (b.year) { year = Math.min(2101,Math.max(1950,year+Number(b.year))); render(); document.querySelector('[data-year="'+b.year+'"]')?.focus(); return; }
+ if (b.month) { selected = b.month; render(); document.querySelector('[data-month="'+selected+'"]')?.focus(); return; }
+ if (b.view) { view = b.view; render(); document.querySelector('[data-view="'+view+'"]')?.focus(); return; }
+ if (b.edit) { courseEditor(b.edit); return; }
+ if (b.details) {
+  const course = sourceCourse(b.details);
+  openDialog(catalogCourseDetails(catalog,course,filter.programme,activeCase(),activeCourses().some(c => c.code === course.code)));
+  return;
+ }
+ if (b.addCode) { courseEditor(null,b.addCode); return; }
+ if (b.delete || b.complete) { changeCourse(b.delete || b.complete,Boolean(b.delete)); return; }
+ switch (b.action) {
+  case 'custom-course': courseEditor(); break;
+  case 'new-case':
+   pendingCourse = b.course ? { code:b.course, programme:filter.programme } : null;
+   openDialog(caseForm(catalog,null,defaultYear)); break;
+  case 'edit-case': pendingCourse = null; openDialog(caseForm(catalog,activeCase(),defaultYear)); break;
+  case 'close-case': setActive(null); page = 'cases'; save(); render(true); break;
+  case 'export': exportDialog(); break;
+  case 'backup-all': exportJSON(); break;
+  case 'import': importBackup(); break;
+  case 'clear-cases': clearCases(); break;
+  case 'review-legacy': reviewLegacy(); break;
+  case 'leave-legacy': legacyExpanded = false; render(true); break;
+  case 'remove-legacy':
+   confirmAction('Ta bort äldre lokal lagring?', 'Äldre planer och namn i den tidigare versionens lokala lagring raderas från den här webbläsaren.', () => {
+    try { storage.removeItem(LEGACY_KEY); }
+    catch { toast('Äldre planer kunde inte raderas.'); return false; }
+    legacy = null;
+    toast('Den äldre lagringen har tagits bort.');
+    return true;
+   }); break;
+  case 'reset-filters': filter = { ...defaultFilter(filter.programme), expanded:true }; render(); document.querySelector('#course-search')?.focus(); break;
+  case 'apply-move': {
+   const form = document.querySelector('#course-form');
+   try {
+    const moved = moveCourse(Object.fromEntries(new FormData(form)),form.elements.moveMonth.value);
+    form.elements.start.value = moved.start;
+    form.elements.end.value = moved.end;
+    form.querySelector('#form-error').textContent = 'Välj Spara kurs för att behålla ändringen.';
+   } catch { form.querySelector('#form-error').textContent = 'Välj en giltig månad.'; }
+   break;
+  }
+ }
+});
+
+document.addEventListener('input', event => {
+ const field = event.target;
+ if (field.id === 'case-note' && activeCase()) { activeCase().note = field.value; save(true); }
+ if (field.id === 'course-search') { filter.q = field.value; renderCatalog(); }
+ if (field.id === 'programme-search') {
+  filter.programmeQuery = field.value;
+  const control = document.querySelector('#programme-filter');
+  control.innerHTML = '<option value="">Välj program</option>' + programmeOptions(catalog,filter.programme,field.value);
+  control.value = filter.programme;
+ }
+});
+
+document.addEventListener('change', event => {
+ const field = event.target;
+ if (field.id === 'programme-filter') {
+  filter = { ...defaultFilter(field.value), programmeQuery:filter.programmeQuery, expanded:true };
+  render();
+  document.querySelector('#programme-filter')?.focus();
+ }
+ if (field.dataset.catalogFilter) { filter[field.dataset.catalogFilter] = field.value; renderCatalog(); }
+ if (field.id === 'catalog-month' && /^\d{4}-\d{2}$/.test(field.value)) selected = field.value;
+ if (field.id === 'catalog-jump') {
+  const section = document.getElementById(field.value);
+  if (!section) return;
+  document.querySelector('.lot-target')?.classList.remove('lot-target');
+  section.classList.add('lot-target');
+  section.open = true;
+  if (section.parentElement.matches('details')) section.parentElement.open = true;
+  section.querySelector('summary').focus();
+  section.scrollIntoView({block:'start'});
+ }
+});
 
 render();

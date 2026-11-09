@@ -5,7 +5,7 @@ export function period(mode,year){
  return Array.from({length:count},(_,i)=>({year:year+Math.floor((start+i)/12),month:(start+i)%12,key:`${year+Math.floor((start+i)/12)}-${String((start+i)%12+1).padStart(2,'0')}`}));
 }
 export function intersects(course,month){return course.start.slice(0,7)<=month.key&&course.end.slice(0,7)>=month.key;}
-export function visibleCourses(courses,studentId,range){return courses.filter(c=>c.studentId===studentId&&range.some(m=>intersects(c,m)));}
+export function visibleCourses(courses,studentId,range){return courses.filter(c=>(c.caseId??c.studentId)===studentId&&range.some(m=>intersects(c,m)));}
 export function switchedYear(from,to,year,selected){
  if(from===to)return year;
  if(from==='academic'&&to==='spring')return year+1;
@@ -58,4 +58,11 @@ export function coursePace(course){
  if(Number.isFinite(course.studyRate)&&course.studyRate>0)return {value:course.studyRate,manual:true};
  const days=(Date.parse(course.end+'T12:00:00Z')-Date.parse(course.start+'T12:00:00Z'))/86400000+1;
  return {value:days>0?Math.round(course.credits*7/(days*1.5)*100):0,manual:false};
+}
+
+export function monthEnd(month) {
+ if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) throw new Error('Ogiltig månad');
+ const end = new Date(month + '-01T12:00:00Z');
+ end.setUTCMonth(end.getUTCMonth() + 1, 0);
+ return end.toISOString().slice(0,10);
 }

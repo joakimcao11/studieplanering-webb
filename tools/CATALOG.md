@@ -39,3 +39,11 @@ Kursinnehåll (`contents`), syfte (`purpose`) och antagningsuppgifter (`admissio
 - Läsperioder är officiell metadata, men inga exakta kalenderdatum skapas från dem. Månad/datum i studieplanen är användarens egen planering.
 - En katalogpost eller specialiseringskoppling innebär inte att en viss students behörighet eller examen har kontrollerats.
 - Utbudet är en daterad kopia för ett läsår. Aktuella scheman, platsbegränsningar och ändringar kontrolleras via källänkarna.
+
+## Källkontroll för etapp 1
+
+Snapshot hämtad 28 oktober 2026. Den har 61 programposter, varav 55 med kurser, 1 253 unika kurser och 4 098 unika kurskopplings-ID:n. Samtliga kursplaner hämtades. 185 kurser saknar TimeEdit-länk, en saknar extraherat syfte och 438 kopplingar saknar LP-markeringar. Appen visar ett tomt källvärde som okänt eller hänvisar till kursplanen.
+
+Den 9 november 2026 jämfördes årskurs, kurskategori, grupp och perioder för D, IDA och A med LTH:s API och de renderade LoT-tabellerna. Antal kurskopplingar var 240, 29 respektive 80. Källkoderna för kategori är `mandatory/O`, `elective_mandatory/A`, `elective/V` och `external_elective/E`. `exjobb` är källans grupp för examensarbete. Specialisering använder källans särskilda specialiseringskod och behåller också ordinarie valkategori. `fromYear` visas som från-årskurs. `timePlans` bevarar varje placering och de perioder där källan har en markering. En koppling kan ha mer än en placering. Fotnoter visas i tabell och detaljer.
+
+Kalender och programundantag finns i `dist/lth-calendar.js`. [LTH:s beslut U 2025/443](https://www.lth.se/fileadmin/lth/anstallda/utbildningsadministration/lasarsindelning/LTH_laesaarsindelning_2026-27_beslut.pdf) styr vilka program som har terminstider utan LP-indelning. För dessa visas katalogplaceringen på terminsnivå och den råa LP-metadatan behålls i snapshoten. [Studentwebben](https://www.student.lth.se/mina-studier/schema-och-lasarsindelning) anger en höstterminsslutdag för nybörjare i Helsingborg som sammanfaller med vårterminens start. Appen visar källuppgiften tillsammans med en uppmaning att kontrollera med programmet. För oklassificerade program visas källans årskurser och kategorier. Andra läsår kräver en separat verifierad kalenderpost.

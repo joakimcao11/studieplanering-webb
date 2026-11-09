@@ -1,30 +1,31 @@
-# Studieplanering
+# Studieplanering LTH
 
-Studieplanering för vägledare med kalenderår, läsår och terminer, LTH:s kurskatalog 2026/2027, studenthantering, dragning av kurser och Word- och PDF-export.
+En lokal arbetsyta för studie- och karriärvägledare och annan LTH-personal. Skapa namnfria ärenden, jämför alternativ och använd LTH:s daterade kursutbud som planeringsunderlag.
 
-Webbplats: https://joakimcao11.github.io/studieplanering-webb/
+[Öppna webbappen](https://joakimcao11.github.io/studieplanering-webb/)
 
-## Användning
+Ärendena finns i den aktuella webbläsarprofilen. De kan flyttas med JSON-export och import. Studentens namn kan anges tillfälligt i exportdialogen för Word eller PDF. Kombinationer av uppgifter och fritext kan identifiera en person. Håll därför anteckningar korta och avidentifierade.
 
-Studentplaner och exportinställningar sparas i den egna webbläsaren. Inga studentuppgifter skickas till GitHub eller lagras i detta repository. Webbplatsen har ingen inloggning eller gemensam databas.
+[Kort användarguide](ANVANDNING.md) · [Katalog och källkontroll](tools/CATALOG.md)
 
-För att föra över befintliga planer från den lokala HTML-filen: exportera en JSON-säkerhetskopia där och importera den under Studenter på webbplatsen. Olika webbadresser och webbläsare har separata sparutrymmen.
+## Utveckling
 
-Kurskatalogen är en daterad kopia från LTH. Planeringsdatum är egna datum och är inte ett verifierat schema. Studietakt och poäng är stöd för planering, inte beslut om behörighet, examen eller studiemedel.
-
-## Utveckling och publicering
-
-Applikationens källfiler finns i `dist/`. `docs/` innehåller motsvarande statiska filer för GitHub Pages. Det behövs inga installerade paket för att köra eller testa sidan.
+`dist/` är arbetskällan och `docs/` är GitHub Pages-kopian. Node 24 används för skripten.
 
 ```text
 npm start
 npm run check
 npm test
 npm run pages
+npm run build
 ```
 
-Efter ändringar i `dist/`: kör `npm run pages`, lägg till ändringarna i `dist/` och `docs/` och pusha till `main`. GitHub Pages publicerar från `main`, mappen `/docs`.
+`npm run build` skapar en fristående HTML-fil. `npm run pages` kopierar de statiska filerna till `docs/`. GitHub Pages publicerar från `main:/docs`.
 
-`npm run build` skapar en fristående HTML-fil för lokal användning. `npm run sync:catalog` hämtar en ny kopia av LTH-katalogen för det konfigurerade läsåret; kör därefter `npm run pages`.
+## Överlämning från etapp 1
 
-Mer användardokumentation finns i [ANVANDNING.md](ANVANDNING.md). Bibliotek och licensuppgifter finns under `dist/vendor`, och logotypernas källor i `tools/BRANDING-ASSETS.md`.
+- `dist/cases.js` läser och validerar schema 3. Nyckeln är `studieplan-v3`. En arbetsyta innehåller `cases`, `courses`, `activeCaseId` och mallpreferenser. JSON-backupen innehåller bara version, ärenden och kurser inom vald omfattning.
+- Ett ärende har ett lokalt slump-ID, tidsstämplar, programkod, antagningsår, årskurs, planeringsläsår, mål, avidentifierad anteckning och en markering för alternativ. En kurs tillhör ett ärende via `caseId`. En kurs från katalogen har kurskod, källäsår, programkoppling, `periods` och `timePlans` skilda från egna datum.
+- Äldre `studieplan-v1` med schema 1/2 lämnas kvar tills användaren väljer. Migrationen väljer planer, skapar nya ID:n och utesluter namn och äldre anteckningar. Egna kurser får en neutral titel för eftergranskning.
+- `case-view.js`, `catalog-view.js`, `program-catalog.js`, `lth-calendar.js` och `case-workspace.css` innehåller ärendevy, programkatalog, kalender och layout. Det befintliga planeringsflödet använder fortfarande egna datum och den gamla dokumentmallen via en tillfällig adapter.
+- Nästa etapp kan bygga vidare på `officialCalendar` och kursernas källplacering för planering per LP, omtentamen, kompletteringar och uppdaterade dokument.

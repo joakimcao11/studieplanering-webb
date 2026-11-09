@@ -107,3 +107,5 @@ button.primary:hover { background: #112d5c; }
  .heading { display: flex; align-items: start; flex-direction: column; }
  .catalog-filters > summary { min-height: 36px; }
 }
+.catalog-workspace .catalog-filters input,
+.catalog-workspace .catalog-filters select { grid-column: 1; }

@@ -21,13 +21,13 @@ export function openExportPanel(context) {
  <div class="form-grid">
  ${select('documentMode','Dokument',[['overview','Studieplan – översikt'],['detail','Detaljerat planeringsunderlag']],settings.documentMode)}
  ${field('date','Dokumentdatum','date')}
- ${select('scope','Omfattning',[['all','Hela planen'],['year',context.yearLabel],...(context.termLabel?[['term',context.termLabel]]:[])],'all')}
+ ${select('scope','Omfattning',[['all','Hela planen'],['year',context.yearLabel],...(context.termOptions || [])],'all')}
  ${select('additionalScenario','Exportera scenario',[['','Enbart '+context.scenario.name],...context.others.map(s=>[s.id,context.scenario.name+' och '+s.name])],'')}
  </div>
  <label>Studentens namn (valfritt, används bara i detta dokument)<input id="temporary-name" maxlength="120" autocomplete="off" spellcheck="false"></label>
  <p class="note-footer">Namnet rensas efter nedladdning eller när du stänger dialogen.</p>
  <div class="form-grid">${field('advisor','Vägledarens namn')}${field('role','Titel')}${field('institution','Organisation')}</div>
- <details class="export-more"><summary>Fler inställningar</summary>
+ <details class="export-more"><summary>Anpassa dokument</summary>
  <div class="form-grid">${select('template','Mall',[['neutral','Neutral'],['lth','LTH – textmall'],['lu','LU – textmall'],['custom','Anpassad']],settings.template)}
  ${select('orientation','Pappersformat',[['portrait','A4 stående'],['landscape','A4 liggande']],settings.orientation)}
  ${field('documentTitle','Anpassad dokumentrubrik')}${field('accent','Accentfärg','color')}

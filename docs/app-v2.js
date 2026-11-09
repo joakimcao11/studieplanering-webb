@@ -1,12 +1,12 @@
-import { months, period, intersects, visibleCourses, validateCourse, switchedYear, moveCourse, monthEnd } from './model.js';
+import { months, period, intersects, visibleCourses, validateCourse, switchedYear, moveCourse } from './model.js';
 import { CASE_KEY, LEGACY_KEY, emptyWorkspace, newId, cleanCase, loadWorkspace, saveWorkspace, caseBackup, importCases, cleanPlannedCourse, legacyChoices, migrateLegacy, exportPreferences } from './cases.js';
-import { casesPage, caseTitle, caseForm, caseProgram, casePrivacy } from './case-view.js';
-import { catalogPage, catalogResults, catalogCourseDetails, htmlEscape, officialLink, programmeOptions } from './catalog-view.js';
+import { savedCases, startCaseForm, caseForm, caseProgram, casePrivacy } from './case-view.js';
+import { coursePanel, catalogResults, catalogCourseDetails, htmlEscape, officialLink } from './catalog-view.js';
 import { downloadFile } from './exports.js';
 import { openExportPanel } from './export-ui.js';
 import { initialScenario, scenarioFor, scenarioCourses, validateTask, copyScenario, planSlots, slots, hasKey, yearOf, yearText, isPlanYear, plannedLabel, placementLabel, planningDates, datesForSlots } from './planning.js';
-import { planningWorkspace, taskForm, planDialog, formEnd } from './planning-view.js';
-import { pickerForm, pickerResults, courseDraft, placementForm } from './course-placement-ui.js';
+import { planningWorkspace, comparisonDialog, planDetailsDialog, taskForm, planDialog, formEnd } from './planning-view.js';
+import { courseDraft, placementForm, sourcePlacementButtons } from './course-placement-ui.js';
 import { createPlanningSnapshot } from './planning-export.js';
 
 const catalog = globalThis.STUDIE_CATALOG;
@@ -30,24 +30,24 @@ const localDate = new Date().toLocaleDateString('sv-SE', { timeZone:'Europe/Stoc
 const defaultYear = Number(localDate.slice(0,4)) - (Number(localDate.slice(5,7)) < 8 ? 1 : 0);
 const activeCase = () => data.cases.find(c => c.id === data.activeCaseId);
 let mode = 'academic', year = activeCase()?.planningYear ?? defaultYear;
-let selected = year + '-08', page = 'cases', dragged = null;
-let planViewMode = matchMedia('(max-width: 700px)').matches ? 'list' : 'year';
-let activeTerm = 'HT', comparison = '', picker = null;
+let selected = year + '-08', dragged = null;
+let comparison = '', mobilePicker = false, preferredSlot = '';
 let completionFilters = {status:'open',period:'',course:''};
-let planYear = activeCase()?.planningYear ?? defaultYear;
-let catalogDateMonth = '';
 const activeScenario = () => scenarioFor(activeCase());
-let legacy = null, legacyExpanded = true, migrationGroups = null, pendingCourse = null;
+let planYear = activeScenario()?.years.includes(year) ? year : activeScenario()?.years[0] ?? year;
+let legacy = null, migrationGroups = null;
 try { legacy = storage.getItem(LEGACY_KEY); } catch { /* Storage failure is surfaced above. */ }
 
-function defaultFilter(programme = activeCase()?.programmeId || '') {
- return { programme, programmeQuery:'', q:'', year:'', category:'', specialization:'', lp:'', status:'', expanded:!matchMedia('(max-width: 700px)').matches };
+function defaultFilter() {
+ const record = activeCase();
+ const studyYear = record?.studyYear && catalog.courses.some(c=>c.offerings.some(o=>o.programmeId===record.programmeId && o.year===record.studyYear)) ? record.studyYear : '';
+ return {q:'',year:String(studyYear),category:'',specialization:'',lp:'',status:'',level:'',expanded:false,limit:40};
 }
 let filter = defaultFilter();
 const range = () => period(mode, year);
 const activeCourses = () => activeCase() ? scenarioCourses(data.courses,activeCase(),activeScenario()) : [];
 const shownCourses = () => visibleCourses(activeCourses().filter(c=>c.useOwnDates || c.plannedPeriods.every(p=>datesForSlots(activeCase(),c.plannedYear,[p]).length)),data.activeCaseId,range());
-const saveLabel = () => storageError ? 'Sparning misslyckades · osparade ändringar' : data.cases.length ? 'Sparat på den här enheten' : 'Lokal arbetsyta';
+const saveLabel = () => storageError ? 'Sparning misslyckades · osparade ändringar' : data.cases.length ? 'Sparat lokalt' : 'Lokal arbetsyta';
 
 function save(touch = false) {
  if (touch && activeCase()) activeCase().updatedAt = new Date().toISOString();
@@ -56,7 +56,7 @@ function save(touch = false) {
   if (!storageError) lastSaved = storage.getItem(CASE_KEY);
  } catch { storageError = true; }
  const status = document.querySelector('#save-status');
- if (status) status.textContent = saveLabel();
+ if (status) { status.textContent = saveLabel(); status.dataset.saveError = String(storageError); }
  return !storageError;
 }
 
@@ -69,14 +69,14 @@ function setActive(id) {
  comparison = '';
  completionFilters = {status:'open',period:'',course:''};
  filter = defaultFilter();
- catalogDateMonth = '';
+ preferredSlot = '';
 }
 
 function toast(message,undo){const t=document.querySelector('#toast');t.replaceChildren(document.createTextNode(message));if(undo){const b=document.createElement('button');b.textContent='Ångra';b.onclick=()=>{undo();const ok=save();render();toast(ok?'Ändringen har ångrats.':'Ändringen ångrades i arbetsytan. Sparning misslyckades.');};t.append(b);}t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),undo?12000:5000);}
 function title(){return mode==='academic'?`${year} / ${year+1}`:mode==='autumn'?`HT ${year}`:mode==='spring'?`VT ${year}`:String(year);}
 function season(m){return m.month>=7?'autumn':m.month>=5?'summer':'spring';}
 function courseBar(c,r){const indices=r.map((m,i)=>intersects(c,m)?i:-1).filter(i=>i>=0);return `<div class="course-row timeline-grid"><button class="course-details" data-edit="${esc(c.id)}" aria-label="Redigera ${esc(c.title)}"><b>${esc(c.title)}</b><small>${esc(c.code||'Egen kurs')} · ${fmt(c.credits)} hp ${c.level?'· '+esc(c.level):''}</small></button>${r.map((m,i)=>`<div class="cell ${season(m)==='summer'?'summer-cell':''} ${m.key===selected?'selected-cell':''}" style="grid-column:${i+2}" data-drop-month="${m.key}"></div>`).join('')}<button draggable="false" data-drag-course="${esc(c.id)}" class="bar ${esc(c.status)}" style="grid-column:${indices[0]+2} / ${indices.at(-1)+3}" data-edit="${esc(c.id)}" title="Dra för att flytta. Klicka för att redigera ${esc(c.title)}." aria-label="Flytta eller redigera ${esc(c.title)}">⠿ ${statuses[c.status]} · ${fmt(c.credits)} hp</button></div>`;}
-function timeline(courses,r){const groups=[];for(const m of r){const key=season(m);if(groups.at(-1)?.key===key)groups.at(-1).count++;else groups.push({key,count:1,year:m.year});}return `<div class="timeline-scroll"><div class="timeline" style="--columns:${r.length}"><div class="season-row timeline-grid"><div class="season-label">${labels[mode].toUpperCase()} ${title()}</div>${groups.map(g=>`<div class="season ${g.key}" style="grid-column:span ${g.count}">${g.key==='autumn'?'HÖST':g.key==='spring'?'VÅR':'SOMMAR'} ${g.year}</div>`).join('')}</div><div class="month-row timeline-grid"><div class="course-label">Kurs / högskolepoäng</div>${r.map(m=>`<button class="month ${m.key===selected?'active':''}" data-month="${m.key}" data-drop-month="${m.key}" aria-pressed="${m.key===selected}" aria-label="${months[m.month]} ${m.year}">${months[m.month].slice(0,3)}</button>`).join('')}</div>${courses.map(c=>courseBar(c,r)).join('')||`<div class="empty-start"><h3>Din studieplan är redo att fyllas</h3><p>1. Utforska kursutbudet &nbsp; 2. Lägg till en kurs &nbsp; 3. Placera den i en månad</p><button class="primary" data-page="catalog">Utforska kurser</button></div>`}</div></div>`;}
+function timeline(courses,r){const groups=[];for(const m of r){const key=season(m);if(groups.at(-1)?.key===key)groups.at(-1).count++;else groups.push({key,count:1,year:m.year});}return `<div class="timeline-scroll"><div class="timeline" style="--columns:${r.length}"><div class="season-row timeline-grid"><div class="season-label">${labels[mode].toUpperCase()} ${title()}</div>${groups.map(g=>`<div class="season ${g.key}" style="grid-column:span ${g.count}">${g.key==='autumn'?'HÖST':g.key==='spring'?'VÅR':'SOMMAR'} ${g.year}</div>`).join('')}</div><div class="month-row timeline-grid"><div class="course-label">Kurs / högskolepoäng</div>${r.map(m=>`<button class="month ${m.key===selected?'active':''}" data-month="${m.key}" data-drop-month="${m.key}" aria-pressed="${m.key===selected}" aria-label="${months[m.month]} ${m.year}">${months[m.month].slice(0,3)}</button>`).join('')}</div>${courses.map(c=>courseBar(c,r)).join('')||`<p class="workspace-empty">Inga kurser i perioden.</p>`}</div></div>`;}
 function calendarPanelView() {
  const courses = shownCourses();
  return `<section class="planning"><div class="planning-head"><div><h2>Kalender med planeringsdatum</h2><p>Kurser med egna eller föreslagna kalenderdatum. Dra för att flytta till en annan månad.</p></div>
@@ -88,24 +88,31 @@ function calendarPanelView() {
 
 function planView() {
  const record = activeCase();
- return planningWorkspace(record,activeScenario(),data.courses.filter(c=>c.caseId===record.id),planYear,planViewMode,activeTerm,comparison,completionFilters,catalog,calendarPanelView,matchMedia('(max-width: 740px)').matches);
+ return planningWorkspace(record,activeScenario(),data.courses.filter(c=>c.caseId===record.id),planYear,comparison,completionFilters,catalog,
+  coursePanel(catalog,record,filter,activeCourses()));
 }
 
 function openPicker(slot) {
- picker = picker || {preferred:slot || '',filter:{q:'',year:'',category:'',lp:''}};
- openDialog(pickerForm(catalog,activeCase(),picker.filter));
+ if (slot) {
+  preferredSlot = slot;
+  filter.lp = planSlots(activeCase(),planYear).includes(slot) ? slot : '';
+  filter.limit = 40;
+ }
+ if (mobilePicker || matchMedia('(max-width: 760px)').matches) {
+  mobilePicker = true;
+  openDialog(planDialog('Välj kurser',`<div class="details-body" data-mobile-picker>${coursePanel(catalog,activeCase(),filter,activeCourses(),true)}</div>`));
+ } else {
+  refreshCoursePanels();
+  document.querySelector('.workspace-catalog [data-catalog-query]')?.focus();
+ }
 }
 
-function courseEditor(id,code,programme = filter.programme) {
- if (!activeCase()) { openDialog(caseForm(catalog,null,defaultYear)); return; }
- const previous = id ? activeCourses().find(c=>c.id===id) : activeCourses().find(c=>c.code===code);
+function courseEditor(id,code,offeringId) {
+ if (!activeCase()) return;
+ const previous = id ? activeCourses().find(c=>c.id===id) : code && activeCourses().find(c=>c.code===code);
  const source = sourceCourse(previous?.code || code);
- const draft = courseDraft(previous,source,activeCase(),activeScenario(),planYear,picker?.preferred,programme);
- if (!previous && draft.useOwnDates && catalogDateMonth && yearOf(catalogDateMonth+'-01')===planYear) {
-  draft.start = catalogDateMonth+'-01';
-  draft.end = monthEnd(catalogDateMonth);
- }
- openDialog(placementForm(draft,activeCase(),activeScenario(),Boolean(picker),source));
+ const draft = courseDraft(previous,source,activeCase(),activeScenario(),planYear,preferredSlot,activeCase().programmeId,offeringId);
+ openDialog(placementForm(draft,activeCase(),activeScenario(),mobilePicker,source));
 }
 
 function replaceCourse(next) {
@@ -123,6 +130,7 @@ function moveFeedback(before,next) {
  rememberYear(activeScenario(),next.plannedYear);
  const ok = save(true);
  render();
+ refreshCalendar();
  document.querySelector('[data-edit="'+next.id+'"]')?.focus({preventScroll:true});
  toast(ok?'Kursen flyttades till '+plannedLabel(next.plannedPeriods)+'.':'Kursen flyttades i arbetsytan. Sparning misslyckades.',()=>{
   const current = data.courses.find(c=>c.id===before.id);
@@ -171,55 +179,89 @@ document.addEventListener('pointercancel',clearPointerDrag);
 document.addEventListener('click',e=>{if(performance.now()<suppressClicksUntil){e.preventDefault();e.stopImmediatePropagation();}},true);
 
 
-const nav = [['cases','▤','Mina studieplaneringar'],['plan','▦','Studieplanering'],['catalog','⌕','LTH:s kurskatalog'],['help','?','Så fungerar det']];
 const dialog = document.querySelector('#editor');
+let dialogReturnFocus = null;
 
-function helpPage() {
- return `<header class="heading"><h1>Så fungerar det</h1></header><section class="panel help">
+function helpDialog() {
+ return planDialog('Så fungerar det',`<div class="details-body help">
  <h2>Arbeta med ett ärende</h2><ol><li>Skapa en studieplanering och ange program, årskurs och planeringsläsår.</li>
- <li>Öppna en kurs i LTH:s kurskatalog för att läsa källuppgifterna och lägga till den.</li>
- <li>Dra kursen till en månad eller öppna kursen och ändra datumen.</li>
+ <li>Sök i Välj kurser. Öppna kursnamnet för källuppgifter eller lägg till kursen direkt.</li>
+ <li>Dra kursen till en period eller öppna kursen och ändra placeringen.</li>
  <li>Exportera Word eller PDF. Använd JSON om du vill spara en namnfri säkerhetskopia.</li></ol>
  <h2>Kursutbud och antagningskull</h2><p>Antagningskullen anger när utbildningen påbörjades. Kursutbudet har ett eget källäsår. Kontrollera kraven i utbildningsplanen för antagningskullen.</p>
  <p>LP anger placering i LoT. Kursens HP räknas en gång i vald vy och fördelas inte mellan perioderna. Avklarad är en manuell markering.</p>
  <h2>Lokal lagring och dokument</h2><p>${casePrivacy} Namnfria uppgifter kan identifiera någon i kombination. Planerna synkas inte och kan försvinna när webbläsardata rensas.</p>
  <p>Studentens namn kan anges i exportdialogen och rensas efter export eller när dialogen stängs. Välj översikt eller detaljerat underlag och vilka scenarier som ska ingå.</p>
  <p>Kontrollera resultat i Ladok, examenskrav i utbildningsplanen, studiemedel hos CSN och schema i TimeEdit.</p>
- ${officialLink(catalog.sourceUrl,'Officiellt kursutbud på LTH')}</section>`;
+ ${officialLink(catalog.sourceUrl,'Officiellt kursutbud på LTH')}</div><div class="dialog-actions"><button data-close>Stäng</button></div>`);
 }
 
-function renderCatalog() {
- const host = document.querySelector('#catalog-results');
- if (host) host.innerHTML = catalogResults(catalog,filter);
+function updateCourseResults() {
+ for (const host of document.querySelectorAll('[data-course-results]')) host.innerHTML = catalogResults(catalog,activeCase(),filter,activeCourses());
+}
+
+function refreshCoursePanels(control) {
+ for (const host of document.querySelectorAll('.workspace-catalog,[data-mobile-picker]')) {
+  host.innerHTML = coursePanel(catalog,activeCase(),filter,activeCourses(),host.hasAttribute('data-mobile-picker'));
+ }
+ if (control) (dialog.open?dialog:document).querySelector('[data-catalog-filter="'+control+'"]')?.focus();
 }
 
 function render(focusHeading = false) {
- const navLabel = nav.find(([key]) => key === page)[2];
- const emptyPlan = '<section class="panel empty-start"><h1>Ingen öppen studieplanering</h1><p>Öppna ett tidigare ärende eller skapa ett nytt.</p><button class="primary" data-action="new-case">＋ Ny studieplanering</button><button data-page="cases">Mina studieplaneringar</button></section>';
- document.querySelector('#app').innerHTML = `<aside class="sidebar"><div class="brand"><div class="mark" aria-hidden="true">▥</div><div><strong>Studieplanering LTH</strong><small>ARBETSVERKTYG FÖR PERSONAL</small></div></div>
- <nav class="nav" aria-label="Huvudmeny">${nav.map(([key,icon,label]) => `<button data-page="${key}" class="${page === key ? 'active' : ''}" ${page === key ? 'aria-current="page"' : ''}><span aria-hidden="true">${icon}</span>${label}</button>`).join('')}</nav></aside>
- <main class="main" id="main" tabindex="-1"><div class="topbar"><span>${navLabel}${activeCase() && page !== 'plan' ? ' · ' + esc(caseTitle(activeCase())) : ''}</span><span id="save-status" role="status">${saveLabel()}</span></div>
- ${readError ? '<p class="notice" role="alert">Sparade ärenden kunde inte läsas. Lagringen skrivs inte över. Välj Rensa alla lokala ärenden om du vill börja om.</p>' : storageError ? '<p class="notice" role="alert">Sparning misslyckades. Om appen är öppen i flera flikar kan lagringen ha ändrats. Säkerhetskopiera arbetsytan som JSON innan du laddar om.</p>' : ''}
- ${page === 'cases' ? casesPage(data,catalog,legacy,legacyExpanded) : page === 'catalog' ? catalogPage(catalog,filter,activeCase(),selected) : page === 'plan' ? (activeCase() ? planView() : emptyPlan) : helpPage()}
- <footer class="footer">Planeringsunderlag för LTH-personal · kursutbud ${catalog.academicYearLabel}</footer></main>`;
- renderCatalog();
+ const app = document.querySelector('#app');
+ const open = new Map([...app.querySelectorAll('details[id]')].map(el=>[el.id,el.open]));
+ app.innerHTML = `<div class="workspace-frame"><header class="workspace-header">
+ <div class="workspace-brand"><span class="brand-reserved" aria-label="Plats för originalets logotyp">Logotyp</span>
+ <div><strong>Studieplanering</strong><small>Internt planeringsstöd för LTH-personal</small></div></div>
+ <div class="workspace-header-actions"><span id="save-status" role="status" data-save-error="${storageError}">${saveLabel()}</span>
+ <button data-action="new-case">＋ Nytt ärende</button><button data-action="saved-cases">Öppna sparat</button>
+ <details class="workspace-menu" id="workspace-menu"><summary>Mer</summary><div class="workspace-menu-content">
+ <button data-action="import">Importera JSON</button><button data-action="backup-all" ${data.cases.length?'':'disabled'}>Exportera alla ärenden som JSON</button>
+ ${activeCase()?'<button data-case-backup="'+activeCase().id+'">Exportera aktuellt ärende som JSON</button><button data-action="close-case">Stäng ärendet</button>':''}
+ ${legacy?'<button data-action="review-legacy">Granska äldre planer</button><button class="danger-text" data-action="remove-legacy">Ta bort äldre lagring</button>':''}
+ <button data-action="help">Så fungerar det</button><button class="danger-text" data-action="clear-cases">Rensa alla lokala ärenden</button></div></details></div></header>
+ <main id="main" class="workspace-main" tabindex="-1">
+ ${readError?'<p class="notice" role="alert">Sparade ärenden kunde inte läsas. Lagringen skrivs inte över. Rensning finns under Mer.</p>':
+ storageError?'<p class="notice" role="alert">Sparning misslyckades. Säkerhetskopiera arbetsytan som JSON innan du laddar om.</p>':''}
+ ${activeCase()?planView():startCaseForm(catalog,defaultYear)}</main></div>`;
+ for (const details of app.querySelectorAll('details[id]')) if (open.has(details.id)) details.open = open.get(details.id);
  if (focusHeading) {
-  const heading = document.querySelector('main h1');
+  const heading = app.querySelector('h1');
   heading.tabIndex = -1;
-  heading.focus();
+  heading.focus({preventScroll:true});
  }
 }
 
+function openCalendar() {
+ openDialog(planDialog('Kalenderdatum',`<div id="calendar-content" class="details-body">${calendarPanelView()}</div><div class="dialog-actions"><button data-close>Stäng</button></div>`));
+}
+
+function refreshCalendar(control) {
+ const host = dialog.querySelector('#calendar-content');
+ if (!host) return;
+ host.innerHTML = calendarPanelView();
+ if (control) host.querySelector(control)?.focus({preventScroll:true});
+}
+
 function openDialog(html) {
+ if (!dialog.open) dialogReturnFocus = document.activeElement;
  dialog.innerHTML = html;
  if (!dialog.open) dialog.showModal();
  else (dialog.querySelector('[autofocus]') || dialog.querySelector('button'))?.focus();
 }
+dialog.addEventListener('keydown',event=>{
+ if (event.key==='Escape' && event.target.matches('input[type="search"]')) {
+  event.preventDefault();
+  dialog.close();
+ }
+});
 dialog.addEventListener('close', () => {
  if (!dialog.open) dialog.replaceChildren();
  migrationGroups = null;
- pendingCourse = null;
- picker = null;
+ mobilePicker = false;
+ const target = dialogReturnFocus;
+ dialogReturnFocus = null;
+ if (target?.isConnected && document.activeElement!==target && !dialog.open) target.focus({preventScroll:true});
 });
 
 function exportJSON(id) {
@@ -235,14 +277,13 @@ function exportDialog() {
  const scenario = activeScenario();
  if (!record) return;
  const visibleYear = planYear;
- const term = planViewMode==='term'?activeTerm:'';
  const others = record.scenarios.filter(s=>s.id!==scenario.id);
  openExportPanel({scenario,others,programme:caseProgram(record,catalog)?.code,saved:data.exportSettings,
-  yearLabel:'Läsår '+yearText(visibleYear),termLabel:term ? (term==='HT'?'Hösttermin '+visibleYear:'Vårtermin '+(visibleYear+1)):'',
+  yearLabel:'Läsår '+yearText(visibleYear),termOptions:[['HT','Hösttermin '+visibleYear],['VT','Vårtermin '+(visibleYear+1)]],
   snapshot:(options,name,extra)=>{
    const chosen = others.find(s=>s.id===extra);
    return createPlanningSnapshot({record,scenarios:chosen?[scenario,chosen]:[scenario],courses:data.courses,catalog,
-    year:options.scope==='all'?null:visibleYear,term:options.scope==='term'?term:'',name,options});
+    year:options.scope==='all'?null:visibleYear,term:['HT','VT'].includes(options.scope)?options.scope:'',name,options});
   },
   onSave: settings => { data.exportSettings = exportPreferences(settings); return save(); },
   onBackup: () => exportJSON(record.id) });
@@ -261,7 +302,8 @@ function importBackup() {
    if (Array.isArray(backup?.students)) { reviewLegacy(backup,false); return; }
    data = importCases(data,backup,catalog);
    const ok = save();
-   render(true);
+   render();
+   openDialog(savedCases(data,catalog,legacy));
    toast(ok ? 'Ärendena har importerats.' : 'Ärendena öppnades i arbetsytan. Sparning misslyckades.');
   } catch { toast('Importen misslyckades. Välj en giltig JSON-säkerhetskopia.'); }
  };
@@ -311,8 +353,7 @@ function deleteCase(id) {
   data = { ...data, cases:data.cases.filter(c => c.id !== id), courses:data.courses.filter(c => c.caseId !== id),
    activeCaseId:data.activeCaseId === id ? null : data.activeCaseId };
   if (!save()) { data = before; toast('Ärendet kunde inte tas bort från lokal lagring.'); return false; }
-  page = 'cases';
-  toast('Ärendet har tagits bort.');
+   toast('Ärendet har tagits bort.');
   return true;
  });
 }
@@ -326,8 +367,7 @@ function clearCases() {
   readError = false;
   storageError = false;
   setActive(null);
-  page = 'cases';
-  return true;
+   return true;
  }, true);
 }
 
@@ -354,7 +394,6 @@ function updateScenario(form,values) {
   record.activeScenarioId = copy.scenario.id;
  }
  setActive(record.id);
- page = 'plan';
  finishEdit('Scenariot har sparats.');
 }
 
@@ -384,12 +423,11 @@ function updateCourse(form, fields, values) {
   level:values.level,status:values.status,note:values.note,studyRate:values.studyRate?Number(values.studyRate):null,
   completedCredits:values.status==='done'?credits:Number(values.completedCredits || 0),
   weeks:values.weeks?Number(values.weeks):null,plannedYear,plannedPeriods,allocation,periodRates,useOwnDates,start,end,
-  programmeId:values.programmeId,catalogYear:values.catalogYear};
+  programmeId:values.programmeId,catalogYear:values.catalogYear,offeringId:Number(values.offeringId) || undefined};
  const error = validateCourse(course);
  if (error) throw Error('Ogiltig uppgift. '+error);
  replaceCourse(cleanPlannedCourse(course,catalog));
  planYear = plannedYear;
- page = 'plan';
  finishEdit('Kursen har sparats.');
 }
 
@@ -407,13 +445,13 @@ function updateTask(form,values) {
  finishEdit('Momentet har sparats.');
 }
 
-function updateCase(values) {
- const editing = dialog.querySelector('#editor-title').textContent === 'Ändra grundinformation';
+function updateCase(form,values) {
+ const editing = form.dataset.editing==='true';
  const old = editing ? activeCase() : null;
  const now = new Date().toISOString();
  const record = cleanCase({ id:old?.id || newId(), createdAt:old?.createdAt || now, updatedAt:now,
   programmeId:values.programmeId, admissionYear:Number(values.admissionYear) || null,
-  studyYear:Number(values.studyYear) || null, planningYear:Number(values.planningYear), targetCredits:Number(values.targetCredits),
+  studyYear:Number(values.studyYear) || null, planningYear:Number(values.planningYear), targetCredits:Number(values.targetCredits || 60),
   note:old?.note || '', alternative:old?.alternative || false });
  if (old && (old.programmeId !== record.programmeId || old.planningYear !== record.planningYear) &&
   !window.confirm('Behålla befintliga kurser och markera kurskopplingar som behöver kontrolleras?')) return;
@@ -428,13 +466,9 @@ function updateCase(values) {
   record.activeScenarioId = scenario.id;
   data.cases.push(record);
  }
- const course = pendingCourse;
- pendingCourse = null;
  setActive(record.id);
- page = course ? 'catalog' : 'plan';
  save();
- if (course) { filter.programme = record.programmeId || course.programme; courseEditor(null,course.code); }
- else dialog.close();
+ if (dialog.open) dialog.close();
  render(true);
 }
 
@@ -452,7 +486,6 @@ function submitMigration(fields, values) {
  data.courses.push(...migrated.courses);
  const ok = save();
  dialog.close();
- page = 'cases';
  render(true);
  toast(ok ? `${migrated.cases.length} ärenden och ${migrated.courses.length} kurser har konverterats.` : 'Planerna konverterades i arbetsytan. Sparning misslyckades.');
 }
@@ -468,7 +501,7 @@ document.addEventListener('submit', event => {
   if (form.id === 'task-form') updateTask(form,values);
   if (form.id === 'scenario-form') updateScenario(form,values);
   if (form.id === 'year-form') addPlanningYear(Number(values.year));
-  if (form.id === 'case-form') updateCase(values);
+  if (form.id === 'case-form') updateCase(form,values);
   if (form.id === 'migration-form') submitMigration(fields,values);
  } catch (error) { form.querySelector('#form-error').textContent = error.message; }
 });
@@ -553,27 +586,16 @@ document.addEventListener('click', event => {
  if (!button) return;
  const b = button.dataset;
  if ('close' in b) { dialog.close(); return; }
- if (b.page) { page = b.page; render(true); return; }
- if (b.caseOpen) { setActive(b.caseOpen); page = 'plan'; save(); render(true); return; }
- if (b.caseCopy) { scenarioEditor(data.cases.find(c=>c.id===b.caseCopy)); return; }
+ if (b.caseOpen) { setActive(b.caseOpen); save(); dialog.close(); render(true); return; }
  if (b.caseDelete) { deleteCase(b.caseDelete); return; }
  if (b.caseBackup) { exportJSON(b.caseBackup); return; }
- if (b.mode) { year = switchedYear(mode,b.mode,year,selected); mode = b.mode; render(); document.querySelector('[data-mode="'+mode+'"]')?.focus(); return; }
- if (b.year) { year = Math.min(2101,Math.max(1950,year+Number(b.year))); render(); document.querySelector('[data-year="'+b.year+'"]')?.focus(); return; }
- if (b.month) { selected = b.month; render(); document.querySelector('[data-month="'+selected+'"]')?.focus(); return; }
- if (b.planView) { planViewMode = b.planView; render(); document.querySelector('[data-plan-view="'+planViewMode+'"]')?.focus(); return; }
- if (b.termView) { activeTerm = b.termView; planViewMode = 'term'; render(); document.querySelector('[data-term-view="'+activeTerm+'"]')?.focus(); return; }
- if (b.addSlot) { picker = null; openPicker(b.addSlot); return; }
+ if (b.mode) { year = switchedYear(mode,b.mode,year,selected); mode = b.mode; refreshCalendar('[data-mode="'+mode+'"]'); return; }
+ if (b.year) { year = Math.min(2101,Math.max(1950,year+Number(b.year))); refreshCalendar('[data-year="'+b.year+'"]'); return; }
+ if (b.month) { selected = b.month; refreshCalendar('[data-month="'+selected+'"]'); return; }
+ if (b.addSlot) { openPicker(b.addSlot); return; }
  if (b.taskNew) { editTask(b.taskNew,null,b.taskSlot); return; }
  if (b.taskEdit) { editTask(...b.taskEdit.split(':')); return; }
  if (b.taskRemove) { removeTask(...b.taskRemove.split(':')); return; }
- if (b.pickerCode) { courseEditor(null,b.pickerCode==='custom'?undefined:b.pickerCode,activeCase().programmeId); return; }
- if (b.pickerDetails) {
-  const c = sourceCourse(b.pickerDetails);
-  const html = catalogCourseDetails(catalog,c,activeCase().programmeId,activeCase(),activeCourses().some(x=>x.code===c.code));
-  openDialog(html.replace('data-add-code=', 'data-picker-code=').replace('<button data-close>Stäng</button>','<button data-action="pick-course">← Till kursvalet</button>'));
-  return;
- }
  if (b.sourcePlacement) {
   const selectedSlots = b.sourcePlacement.split(',');
   dialog.querySelectorAll('[name=slot]').forEach(input=>{input.checked=selectedSlots.includes(input.value);});
@@ -583,11 +605,14 @@ document.addEventListener('click', event => {
  if (b.edit) { courseEditor(b.edit); return; }
  if (b.details) {
   const course = sourceCourse(b.details);
-  openDialog(catalogCourseDetails(catalog,course,filter.programme,activeCase(),activeCourses().some(c => c.code === course.code)));
+  if (!course) return;
+  openDialog(catalogCourseDetails(catalog,course,activeCase().programmeId,activeCase(),activeCourses().some(c=>c.code===course.code),b.offering,mobilePicker));
   return;
  }
- if (b.addCode) { courseEditor(null,b.addCode); return; }
+ if (b.addCode) { courseEditor(null,b.addCode,b.offering); return; }
  if (b.delete) { removeCourse(b.delete); return; }
+ const menu = button.closest('.workspace-menu');
+ if (menu) { menu.removeAttribute('open'); menu.querySelector('summary')?.focus(); }
  switch (b.action) {
   case 'custom-course': courseEditor(); break;
   case 'pick-course': openPicker(); break;
@@ -595,17 +620,19 @@ document.addEventListener('click', event => {
   case 'rename-scenario': scenarioEditor(activeCase(),true); break;
   case 'delete-scenario': removeScenario(); break;
   case 'add-year': openDialog(planDialog('Lägg till läsår',`<form id="year-form"><label>Läsårets startår<input type="number" name="year" min="1950" max="2100" value="${Math.min(2100,activeScenario().years.at(-1)+1)}" required autofocus></label>${formEnd('Lägg till läsår')}</form>`)); break;
-  case 'new-case':
-   pendingCourse = b.course ? { code:b.course, programme:filter.programme } : null;
-   openDialog(caseForm(catalog,null,defaultYear)); break;
-  case 'edit-case': pendingCourse = null; openDialog(caseForm(catalog,activeCase(),defaultYear)); break;
-  case 'close-case': setActive(null); page = 'cases'; save(); render(true); break;
+  case 'new-case': openDialog(caseForm(catalog,null,defaultYear)); break;
+  case 'saved-cases': openDialog(savedCases(data,catalog,legacy)); break;
+  case 'edit-case': openDialog(caseForm(catalog,activeCase(),defaultYear)); break;
+  case 'close-case': setActive(null); save(); render(true); break;
+  case 'calendar': openCalendar(); break;
+  case 'help': openDialog(helpDialog()); break;
+  case 'compare': openDialog(comparisonDialog(activeCase(),activeScenario(),data.courses,comparison)); break;
+  case 'plan-details': openDialog(planDetailsDialog(activeCase(),activeScenario(),data.courses)); break;
   case 'export': exportDialog(); break;
   case 'backup-all': exportJSON(); break;
   case 'import': importBackup(); break;
   case 'clear-cases': clearCases(); break;
   case 'review-legacy': reviewLegacy(); break;
-  case 'leave-legacy': legacyExpanded = false; render(true); break;
   case 'remove-legacy':
    confirmAction('Ta bort äldre lokal lagring?', 'Äldre planer och namn i den tidigare versionens lokala lagring raderas från den här webbläsaren.', () => {
     try { storage.removeItem(LEGACY_KEY); }
@@ -614,7 +641,16 @@ document.addEventListener('click', event => {
     toast('Den äldre lagringen har tagits bort.');
     return true;
    }); break;
-  case 'reset-filters': filter = { ...defaultFilter(filter.programme), expanded:true }; render(); document.querySelector('#course-search')?.focus(); break;
+  case 'reset-filters': filter = {...defaultFilter(),expanded:true}; preferredSlot = ''; refreshCoursePanels('year'); break;
+  case 'clear-period': filter.lp = ''; preferredSlot = ''; refreshCoursePanels(); (dialog.open?dialog:document).querySelector('[data-catalog-query]')?.focus(); break;
+  case 'more-courses': {
+   const host = button.closest('[data-course-results]');
+   const visible = host.querySelectorAll('.workspace-course-row').length;
+   filter.limit+=40;
+   updateCourseResults();
+   host.querySelectorAll('.workspace-course-row')[visible]?.querySelector('button')?.focus();
+   break;
+  }
 
  }
 });
@@ -627,14 +663,9 @@ document.addEventListener('input', event => {
   else activeScenario()[key] = field.value;
   save(true);
  }
- if (field.id==='picker-query') { picker.filter.q = field.value; updatePickerResults(); }
- if (field.id === 'course-search') { filter.q = field.value; renderCatalog(); }
- if (field.id === 'programme-search') {
-  filter.programmeQuery = field.value;
-  const control = document.querySelector('#programme-filter');
-  control.innerHTML = '<option value="">Välj program</option>' + programmeOptions(catalog,filter.programme,field.value);
-  control.value = filter.programme;
- }
+ if (field.hasAttribute('data-catalog-query')) { filter.q = field.value; filter.limit = 40;
+  for (const input of document.querySelectorAll('[data-catalog-query]')) if (input!==field) input.value = filter.q;
+  updateCourseResults(); }
 });
 
 document.addEventListener('change', event => {
@@ -656,38 +687,29 @@ document.addEventListener('change', event => {
  }
  if (field.id==='compare-scenario') {
   comparison = field.value;
-  render();
-  document.querySelector('#compare-scenario')?.focus();
+  openDialog(comparisonDialog(activeCase(),activeScenario(),data.courses,comparison));
+  dialog.querySelector('#compare-scenario')?.focus();
  }
  if (field.dataset.taskFilter) {
   completionFilters[field.dataset.taskFilter] = field.value;
   render();
   document.querySelector('[data-task-filter="'+field.dataset.taskFilter+'"]')?.focus();
  }
- if (field.dataset.pickerFilter) { picker.filter[field.dataset.pickerFilter] = field.value; updatePickerResults(); }
- if (field.closest('#course-form') && ['slot','plannedYear','useOwnDates'].includes(field.name)) syncPlacementFields(field);
- if (field.id === 'programme-filter') {
-  filter = { ...defaultFilter(field.value), programmeQuery:filter.programmeQuery, expanded:true };
-  render();
-  document.querySelector('#programme-filter')?.focus();
- }
- if (field.dataset.catalogFilter) { filter[field.dataset.catalogFilter] = field.value; renderCatalog(); }
- if (field.id === 'catalog-month') { catalogDateMonth = field.value; if (field.value) selected = field.value; }
- if (field.id === 'catalog-jump') {
-  const section = document.getElementById(field.value);
-  if (!section) return;
-  document.querySelector('.lot-target')?.classList.remove('lot-target');
-  section.classList.add('lot-target');
-  section.open = true;
-  if (section.parentElement.matches('details')) section.parentElement.open = true;
-  section.querySelector('summary').focus();
-  section.scrollIntoView({block:'start'});
+ if (field.closest('#course-form') && ['slot','plannedYear','useOwnDates','offeringId'].includes(field.name)) syncPlacementFields(field);
+ if (field.dataset.catalogFilter) {
+  const key = field.dataset.catalogFilter;
+  filter[key] = field.value;
+  filter.limit = 40;
+  filter.expanded = Boolean(field.closest('.course-panel-content')?.querySelector('[data-filter-details]')?.open);
+  if (key==='lp') preferredSlot = '';
+  if (key==='year') refreshCoursePanels('year');
+  else updateCourseResults();
  }
 });
 
-function updatePickerResults() {
- document.querySelector('#picker-results').innerHTML = pickerResults(catalog,activeCase().programmeId,picker.filter);
-}
+document.addEventListener('toggle',event=>{
+ if (event.target.matches?.('[data-filter-details]') && event.target.isConnected) filter.expanded = event.target.open;
+},true);
 
 function syncPlacementFields(changed) {
  const form = dialog.querySelector('#course-form');
@@ -706,7 +728,14 @@ function syncPlacementFields(changed) {
  form.querySelector('#placement-dates').hidden = !own;
  const values = Object.fromEntries(new FormData(form));
  const course = sourceCourse(values.code);
- const draft = courseDraft(null,course,activeCase(),activeScenario(),Number(values.plannedYear),null,values.programmeId);
+ const draft = courseDraft(null,course,activeCase(),activeScenario(),Number(values.plannedYear),null,values.programmeId,values.offeringId);
+ const summary = form.querySelector('[data-offering-summary]');
+ if (changed?.name==='offeringId' && summary) {
+  const isTerm = planSlots({programmeId:draft.programmeId},draft.plannedYear)[0]==='HT';
+  const periods = draft.periods.map(p=>isTerm?(p<=2?'HT':'VT'):String(p));
+  summary.textContent = [draft.programmeId,draft.catalogYear.replace('_','/'),periods.length?plannedLabel([...new Set(periods)]):'Placering saknas'].join(' · ');
+ }
+ if (changed && ['offeringId','plannedYear'].includes(changed.name)) form.querySelector('[data-source-suggestions]').innerHTML = sourcePlacementButtons(draft,activeCase());
  form.querySelector('#placement-hint').textContent = placementLabel({...draft,plannedPeriods:periods,useOwnDates:own},activeCase());
 }
 

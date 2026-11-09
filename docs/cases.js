@@ -40,10 +40,12 @@ export function cleanPlannedCourse(course, catalog) {
  const placement = validatePlacement(course,credits);
  // Rebuild source metadata from the public snapshot, independently of placement.
  const official = catalog?.academicYear === catalogYear && catalog?.courses.find(c=>c.code===code);
- const offers = official ? official.offerings.filter(o=>o.programmeId===programmeId) : [];
+ const matches = official ? official.offerings.filter(o=>o.programmeId===programmeId) : [];
+ const chosen = matches.find(o=>o.sourceId===course.offeringId);
+ const offers = chosen ? [chosen] : matches;
  return { id,caseId,scenarioId,title,code,start,end,credits,level,status,note,studyRate,completedCredits,...placement,
   datesArePlanning:true,catalogYear:official ? catalogYear : '',
-  programmeId:offers.length ? programmeId : '',sourceUrl:official?.syllabusUrl || '',
+  programmeId:offers.length ? programmeId : '',offeringId:chosen?.sourceId,sourceUrl:official?.syllabusUrl || '',
   offeringActive:Boolean(official && official.status==='active' && offers.some(o=>o.status==='active')),
   periods:[...new Set(offers.flatMap(o=>o.periods))].sort(),timePlans:offers.flatMap(o=>o.timePlans) };
 }

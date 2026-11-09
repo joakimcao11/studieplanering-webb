@@ -1,18 +1,13 @@
-# Användarguide för LTH-personal
+# Studieplanering LTH
 
-1. Öppna **Mina studieplaneringar** och välj **Ny studieplanering**. Ange program och planeringsläsår. Lägg till antagningsår och aktuell årskurs om de är kända.
-2. Välj **Lägg till kurs** i arbetsytan, eller gå till **LTH:s kurskatalog** för den fullständiga läro- och timplanen. Filtrera på årskurs, kategori, specialisering eller LP. I kursdialogen är den officiella placeringen skild från planerad placering. Egna och externa kurser kan läggas till manuellt.
-3. Arbeta i **Läsårsöversikt**, **Terminsvy**, **Kurslista** eller **Kalender**. Dra kursen till en LP-ruta eller använd **Ändra placering**. Spara ett flerperiodsval som en enda kurs. Lägg till läsår när det behövs.
-4. Använd **Omtentamensperioder** och **Kompletteringar** för kvarstående examinationer. En kurskoppling kan behållas när kursen flyttas. Vid borttagning väljer du om kopplade moment ska behållas fristående eller också tas bort.
-5. Välj **Skapa alternativ** för att kopiera kursplanen inom ärendet. Välj uttryckligen om även moment och anteckningar ska följa med. Använd **Jämför två scenarier** för att se skillnader i kursval, belastning och kvarstående moment.
-6. Skriv kort agenda och planeringsöverenskommelser och lägg vid behov till nästa steg med datum och ansvar.
-7. Välj **Granska och exportera** för Word eller PDF. Välj översikt eller detaljerat underlag och ett eller två scenarier. Studentens namn är valfritt och rensas vid nedladdning eller när dialogen stängs. Under **Fler inställningar** finns bland annat A4 stående/liggande, mall och källavsnitt.
-8. Använd JSON-export och import för säkerhetskopior. Det går att spara ett ärende med dess scenarier eller hela arbetsytan. Radering av ett ärende eller scenario kräver bekräftelse.
+Arbetsytan öppnar det aktiva ärendet när du laddar om sidan. Om inget ärende är öppet väljer du program och läsår och trycker på **Börja planera**. Inget studentnamn behövs.
 
-Planeringsläsåret och katalogens källäsår har olika roller. Använd LTH:s källor för att kontrollera utbildningsplan, kurstillfälle, omtentamen och faktiskt schema. Poäng för flera perioder fördelas bara om vägledaren uttryckligen anger en uppskattning. Ofördelade kurser har kvar sina totala kurspoäng. Avklarat och delpoäng är manuella uppgifter i planen.
+1. Sök i **Välj kurser**, eller öppna kursvalet med **Lägg till kurs** på mobilen. Årskursen föreslås från ärendet. För årskurs 4 och 5 visas specialiseringsvalet vid behov. Under **Fler filter** finns bland annat läsperiod, nivå och kursstatus.
+2. Öppna ett kursnamn för kursplan, LoT, förkunskaper och TimeEdit när källan har en länk. En kurs visas under första läsperioden. Ett senare periodfilter hittar även kurser som fortsätter från en tidigare period. Om LoT har olika erbjudanden kan du välja rätt variant.
+3. Dra kursen till en period eller öppna den i planen för att ändra placering, status, planeringsdatum och manuella värden. En fortsättning i en annan period är samma kurs. Om det finns kopplade moment får du välja hur de ska hanteras när en kurs tas bort.
+4. Öppna **Omtentamina**, **Kompletteringar** eller **Anteckningar och uppföljning** under planeringen. Dessa moment ökar inte kursens högskolepoäng.
+5. Skapa ett nytt alternativ inom ärendet eller byt plan i listan **Plan**. Under **Mer för planen** finns bland annat kalenderdatum, kurslista, jämförelse och fler läsår.
+6. Välj **Granska och exportera** i sammanställningen. Word och PDF kan omfatta ett eller två scenarier. **Anpassa dokument** innehåller mallval. Ett tillfälligt studentnamn rensas efter nedladdning eller när dialogen stängs. JSON innehåller enbart de namnfria ärendedata som sparats.
+7. Öppna tidigare ärenden via **Öppna sparat**. Under **Mer** i sidhuvudet finns import, säkerhetskopiering, stängning av aktivt ärende, hjälp och rensning. Äldre studentprofiler hanteras via det tidigare granskningsflödet. Originalet finns kvar tills du väljer att ta bort det.
 
-Håll anteckningar avidentifierade. Undvik namn, kontaktuppgifter, personnummer och känsliga uppgifter. Namnfria uppgifter kan identifiera personer i kombination. Webbläsarens lokala data kan försvinna vid rensning och synkas inte.
-
-## Äldre planer
-
-Namnfria ärenden från tidigare versioner öppnas med kursdatum och anteckningar bevarade i ett första scenario. Under **Äldre lokala planer hittades** kan äldre studentprofiler granskas, konverteras eller raderas. Namn och tidigare fritext förs inte över automatiskt. Egna kurstitlar får en neutral titel för granskning. Originalet finns kvar tills du väljer att radera det.
+Kursutbudet är en daterad kopia för 2026/27. Kontrollera utbildningsplanen för aktuell antagningskull, faktiskt kurstillfälle och schema i LTH:s källor. Fritext måste hållas avidentifierad. Lokala data synkas inte och kan försvinna när webbläsarens lagring rensas.

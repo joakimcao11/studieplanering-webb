@@ -34,8 +34,33 @@ export function filterOfferings(catalog, filter) {
     (!filter.category || offeringCategory(offer) === filter.category || offer.choice === filter.category) &&
     (!filter.specialization || offer.specialization === filter.specialization) &&
     (!filter.lp || (!termOnly && offer.periods.includes(Number(filter.lp)))) &&
-    (!filter.status || status);
+    (!filter.status || status) && (!filter.level || course.level===filter.level);
   }).map(offer => ({ course, offer }));
+ });
+}
+
+export function sortOfferings(rows) {
+ const timeline = row => [...row.offer.periods].sort((a,b)=>a-b);
+ const known = value => value ?? Infinity;
+ return [...rows].sort((a,b)=>{
+  const x = timeline(a), y = timeline(b);
+  for (const [left,right] of [[x[0],y[0]],[x[1]??x[0],y[1]??y[0]],[x.at(-1),y.at(-1)]]) {
+   if (known(left)!==known(right)) return known(left)-known(right);
+  }
+  return String(a.offer.sortOrder ?? '').localeCompare(String(b.offer.sortOrder ?? ''),'sv',{numeric:true}) ||
+   a.course.code.localeCompare(b.course.code,'sv') ||
+   String(a.offer.sourceId ?? '').localeCompare(String(b.offer.sourceId ?? ''),'sv',{numeric:true});
+ });
+}
+
+export function distinctOfferings(rows) {
+ const seen = new Set();
+ return sortOfferings(rows).filter(({course,offer})=>{
+  const key = JSON.stringify([course.code,offer.programmeId,offer.year,offer.fromYear,offer.choice,offer.specialization,
+   offer.groupId,offer.status,offer.footnote,offer.periods,offer.timePlans.map(t=>t.periods)]);
+  if (seen.has(key)) return false;
+  seen.add(key);
+  return true;
  });
 }
 
@@ -57,8 +82,7 @@ export function groupOfferings(rows, structure) {
   groups.get(key).rows.push(row);
  }
  for (const group of groups.values()) {
-  group.rows.sort((a,b) => String(a.offer.sortOrder ?? '').localeCompare(String(b.offer.sortOrder ?? ''), 'sv', { numeric:true }) ||
-   a.course.code.localeCompare(b.course.code,'sv'));
+  group.rows = sortOfferings(group.rows);
  }
  return [...groups.values()].sort((a, b) => (a.year ?? 99) - (b.year ?? 99) ||
   order.indexOf(a.category) - order.indexOf(b.category) || a.title.localeCompare(b.title, 'sv'));

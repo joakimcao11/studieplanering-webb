@@ -2,7 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 const root=import.meta.dirname,source=path.join(root,'dist'),target=path.join(root,'docs');
 await fs.mkdir(target,{recursive:true});
-const files=['planning.js','planning-view.js','course-placement-ui.js','planning-export.js','planning.css','cases.js','case-view.js','catalog-view.js','lth-calendar.js','program-catalog.js','case-workspace.css','index.html','app-v2.js','model.js','exports.js','export-settings.js','export-ui.js','styles.css','v2.css','v3.css','catalog-data.js','catalog.json'];
+const files=['workspace.css','planning.js','planning-view.js','course-placement-ui.js','planning-export.js','planning.css','cases.js','case-view.js','catalog-view.js','lth-calendar.js','program-catalog.js','case-workspace.css','index.html','app-v2.js','model.js','exports.js','export-settings.js','export-ui.js','styles.css','v2.css','v3.css','catalog-data.js','catalog.json'];
 for(const file of files)await fs.copyFile(path.join(source,file),path.join(target,file));
 await fs.cp(path.join(source,'vendor'),path.join(target,'vendor'),{recursive:true});
 await fs.writeFile(path.join(target,'.nojekyll'),'');

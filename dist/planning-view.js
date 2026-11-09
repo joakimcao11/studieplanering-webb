@@ -1,6 +1,6 @@
 import { htmlEscape, officialLink } from './catalog-view.js';
 import { calendarSource, calendarDecision, officialCalendar } from './lth-calendar.js';
-import { caseDescription, casePrivacy, caseTitle } from './case-view.js';
+import { casePrivacy, caseProgram } from './case-view.js';
 import { hp, yearText, slots, examStates, completionStates, completionTypes, retakeWindows, stepStates, roles, courseStates, planSlots, termSlots, datesForSlots, plannedLabel, placementLabel, rateDescription, taskCourse, summarizePlan } from './planning.js';
 
 const h = htmlEscape;
@@ -22,18 +22,6 @@ function loadLabel(load) {
  return load.unknown ? (load.hp ? base+' + ' : '')+load.unknown+' utan fördelning' : base;
 }
 
-function planSummary(stats,year,term,compact) {
- return `<details id="plan-summary" class="panel plan-summary" ${compact?'':'open'}><summary>Sammanställning</summary>
- <p class="eyebrow">LÄSÅR ${yearText(year)}</p><div class="summary-figure"><strong>${hp(stats.total)}</strong> ${term?'hp fördelade i terminen':'hp i planen'}</div>
- ${stats.unknown?'<p>'+stats.unknown+' kurser över flera perioder saknar verifierad terminsfördelning.</p>':''}
- ${stats.unassignedDone?'<p>Avklarade delpoäng utan terminsfördelning visas i läsårsöversikten.</p>':''}
- <dl class="summary-counts"><div><dt>Kurser</dt><dd>${stats.courses.length}</dd></div><div><dt>Avklarat</dt><dd>${hp(stats.done)} hp</dd></div><div><dt>Återstår</dt><dd>${hp(stats.remaining)} hp</dd></div>
- <div><dt>Omtentamina att följa upp</dt><dd>${stats.remainingRetakes}</dd></div><div><dt>Kompletteringar kvar</dt><dd>${stats.remainingCompletions}</dd></div></dl>
- <p class="note-footer">Avklarat enligt planeringen. Kontrollera uppgifterna i Ladok. Moment ger inga extra högskolepoäng.</p>
- ${stats.warnings.length ? `<details class="summary-warnings"><summary>Att granska (${stats.warnings.length})</summary><ul>${stats.warnings.map(w=>`<li><b>${h(w.kind)}</b><br>${h(w.text)}</li>`).join('')}</ul></details>` : ''}
- <button class="primary" data-action="export">Granska och exportera</button></details>`;
-}
-
 function courseStatus(course) {
  return courseStates[course.status]+' · '+rateDescription(course);
 }
@@ -46,80 +34,82 @@ function courseRow(course,scenario,record) {
   `<div class="actions"><button data-edit="${course.id}" aria-label="Ändra placering för ${h(course.title)}">Ändra placering</button><button class="danger-text" data-delete="${course.id}">Ta bort</button></div>`];
 }
 
-function slotHead(record,year,slot,summary) {
- const interval = datesForSlots(record,year,[slot]);
- const value = summary.slots[slot];
- const reference = /^\d$/.test(slot)?15:30;
- return `<div class="slot-heading" data-slot-drop="${slot}"><b>${slots[slot]}</b>${interval.length?`<small>${h(intervalsLabel(interval))}</small>`:''}
- ${value?`<span>${h(loadLabel(value))}</span><progress max="${reference}" value="${Math.min(value.hp,reference)}" aria-label="${h(slots[slot])}: ${h(loadLabel(value))}. Riktmärke ${reference} hp"></progress>`:''}
- <button data-add-slot="${slot}">＋ Lägg till</button></div>`;
+function periodBox(record,year,slot,summary,courses) {
+ const intervals = datesForSlots(record,year,[slot]);
+ const planned = courses.filter(c=>c.plannedPeriods.includes(slot));
+ const count = planned.length + (planned.length===1?' kurs':' kurser');
+ const load = summary.slots[slot];
+ return `<section class="period-box slot-heading" data-slot-drop="${slot}" aria-label="${slots[slot]}">
+ <div class="period-box-head"><h4>${slots[slot]}</h4><small>${count}</small></div>
+ <div class="period-courses">${planned.map(c=>placementTile(c,slot)).join('')}</div>
+ <button class="period-add" data-add-slot="${slot}" aria-label="Lägg till kurs i ${slots[slot]}">＋ Lägg till kurs</button>
+ ${(intervals.length || load?.unknown || load?.manual)?`<small class="period-context">${intervals.length?h(intervalsLabel(intervals)):''}${load?.unknown || load?.manual?'<br>'+h(loadLabel(load)):''}</small>`:''}</section>`;
 }
 
-function periodBoard(courses,record,year,activeSlots) {
- return `<div class="period-board" style="--slots:${activeSlots.length}">${courses.map(course=>{
-  const indices = course.plannedPeriods.map(p=>activeSlots.indexOf(p)).filter(i=>i>=0);
-  if (!indices.length) return '';
-  const consecutive = indices.every((n,i)=>i===0 || n===indices[i-1]+1);
-  const col = consecutive ? (indices[0]+1)+' / '+(indices.at(-1)+2) : '1 / -1';
-  return `<div class="placement-row"><button class="placement-card" draggable="true" data-placement-drag="${course.id}" data-edit="${course.id}" style="grid-column:${col}">
-   <span><b>${h(course.code || 'Egen kurs')}</b> · ${hp(course.credits)} hp · ${h(courseStates[course.status])}</span><strong>${h(course.title)}</strong>
-   <small>${h(plannedLabel(course.plannedPeriods))} · ${h(placementLabel(course,record))}</small></button></div>`;
- }).join('') || '<p class="period-empty">Inga kurser placerade här.</p>'}</div>`;
+function placementTile(course,slot) {
+ const first = course.plannedPeriods[0];
+ const continues = first!==slot;
+ return `<div class="course-tile ${continues?'is-continuation':''}">
+ <button class="placement-card" draggable="true" data-placement-drag="${course.id}" data-edit="${course.id}" aria-label="${h('Ändra '+course.title+(continues?' · fortsättning i '+slots[slot]:''))}">
+ ${continues?'<small>Fortsätter från '+h(slots[first])+'</small>':''}<strong>${h(course.title)}</strong>
+ ${continues?'':`<small>${h(course.code || 'Egen kurs')} · ${hp(course.credits)} hp · ${h(plannedLabel(course.plannedPeriods))}${course.status!=='planned'?' · '+h(courseStates[course.status]):''}</small>`}</button>
+ ${continues?'':`<button class="tile-remove" data-delete="${course.id}" aria-label="Ta bort ${h(course.title)}">×</button>`}</div>`;
 }
 
 function noteInput(field,value,caption,limit=1000) {
  return `<label>${h(caption)}<textarea data-plan-note="${h(field)}" maxlength="${limit}" rows="3" aria-describedby="plan-privacy">${h(value)}</textarea></label>`;
 }
 
-function planBoard(record,scenario,courses,year,view,term,summary,scopedCourses) {
+function planBoard(record,scenario,courses,year,summary) {
  const officialSlots = planSlots(record,year);
- const termMode = view==='term';
- const activeSlots = termMode ? termSlots(officialSlots,term) : officialSlots;
  const calendar = officialCalendar(year,record.programmeId,record.planningYear===year?record.studyYear:null);
  const termCard = key => {
   const label = key==='HT'?'Hösttermin '+year:'Vårtermin '+(year+1);
   const groups = termSlots(officialSlots,key);
   const dates = calendar?.[key==='HT'?'autumn':'spring'];
-  return `<div class="term-frame"><div class="term-label"><div><b>${label}</b>
-  <small>${dates?h(intervalsLabel([dates])):'Terminsdatum saknas i kalenderunderlaget.'}</small>
-  <small>${h(loadLabel(summary[key]))}</small></div>${termMode?'':`<button data-term-view="${key}">Öppna termin</button>`}</div>
-  <div class="period-headings" style="--slots:${groups.length}">${groups.map(p=>slotHead(record,year,p,summary)).join('')}</div></div>`;
+  return `<section class="term-card workspace-card"><div class="term-title"><h3>${label}</h3>
+  <small>${groups.length>1?h(plannedLabel(groups)):dates?h(intervalsLabel([dates])):''}</small></div>
+  <div class="period-columns" style="--slots:${groups.length}">${groups.map(p=>periodBox(record,year,p,summary,courses)).join('')}</div>
+  <div class="term-total"><span>Planerad omfattning</span><strong>${h(loadLabel(summary[key]))}</strong></div>
+  <details id="term-notes-${key}" class="term-notes"><summary>Periodanteckningar</summary>
+  <div class="period-notes">${groups.map(p=>noteInput(year+':'+p,scenario.periodNotes[year+':'+p] || '',slots[p]+' · anteckning',500)).join('')}</div></details></section>`;
  };
- const own = (termMode?scopedCourses:courses).filter(c=>c.plannedPeriods.every(p=>!activeSlots.includes(p)));
- return `<section class="panel period-section" aria-label="Läsårsplanering">
- <div class="term-frames ${termMode?'term-single':''}">${(termMode?[term]:['HT','VT']).map(termCard).join('')}</div>
- ${periodBoard(courses,record,year,activeSlots)}
- ${termMode ? `<div class="period-notes">${activeSlots.map(p=>noteInput(year+':'+p,scenario.periodNotes[year+':'+p] || '',slots[p]+' · anteckning',500)).join('')}</div>` :
- `<div class="other-placements">${['SUMMER','OWN'].map(p=>slotHead(record,year,p,summary)).join('')}</div>`}
- ${own.length?gridTable(['Kod','Kurs','HP','Läsår','Placering','Status och studietakt','Moment','Åtgärd'],own.map(c=>courseRow(c,scenario,record))):''}
- <p class="note-footer">Placering visar planens perioder. Kontrollera kurstillfälle och schema. Staplar jämför kända poäng med 15 hp per LP eller 30 hp per termin.</p>
- ${calendar?.note?`<p class="note-footer">${h(calendar.note)}</p>`:''}
- ${calendar?.exams?`<details class="official-exams"><summary>Ordinarie tentamensperioder</summary>
-  <p>${(termMode?(term==='HT'?[1,2]:[3,5]):[1,2,3,5]).map(n=>'<b>Tp'+n+'</b> '+h(intervalsLabel([calendar.exams[n]]))).join('<br>')}</p></details>`:''}
- ${officialLink(calendarSource,'LTH:s läsårsindelning')}</section>`;
+ const other = courses.filter(c=>c.plannedPeriods.some(p=>!officialSlots.includes(p)));
+ return `${termCard('HT')}${termCard('VT')}
+ <details class="workspace-card other-periods" id="other-periods" ${other.length?'open':''}><summary>Sommar och egen placering${other.length?' · '+other.length+' kurser':''}</summary>
+ <div class="period-columns" style="--slots:2">${['SUMMER','OWN'].map(p=>periodBox(record,year,p,summary,courses)).join('')}</div>
+ ${other.some(c=>c.plannedPeriods.every(p=>!['SUMMER','OWN',...officialSlots].includes(p)))?
+ gridTable(['Kod','Kurs','HP','Läsår','Placering','Status och studietakt','Moment','Åtgärd'],
+ other.filter(c=>c.plannedPeriods.every(p=>!['SUMMER','OWN',...officialSlots].includes(p))).map(c=>courseRow(c,scenario,record))):''}
+ </details>
+ <details class="workspace-calendar-note" id="workspace-calendar-note"><summary>Läsårsdatum och källor</summary>
+ ${calendar?`<p>Hösttermin ${h(intervalsLabel([calendar.autumn]))}<br>Vårtermin ${h(intervalsLabel([calendar.spring]))}</p>`:'<p>Verifierade läsårsdatum saknas i kalenderunderlaget för det här året.</p>'}
+ ${calendar?.note?`<p>${h(calendar.note)}</p>`:''}
+ ${calendar?.exams?`<p>${[1,2,3,5].map(n=>'<b>Tp'+n+'</b> '+h(intervalsLabel([calendar.exams[n]]))).join('<br>')}</p>`:''}
+ ${officialLink(calendarSource,'LTH:s läsårsindelning')}</details>`;
 }
 
-function examPanel(scenario,courses,record,year,term,catalog) {
+function examPanel(scenario,courses,record,year,catalog) {
  const calendar = officialCalendar(year,record.programmeId,record.planningYear===year?record.studyYear:null);
- return `<section class="panel plan-section"><div class="panel-head"><div><p class="eyebrow">EXAMINATION</p><h2>Omtentamensperioder</h2></div><button data-task-new="retakes">＋ Lägg till omtentamen</button></div>
+ return `<section class="panel plan-section"><div class="panel-head"><h3>Omtentamensperioder</h3><button data-task-new="retakes">＋ Lägg till omtentamen</button></div>
  <p class="note-footer">Tidsfönster för planering. Kontrollera tillfälle, datum och anmälan i TimeEdit eller Ladok.</p>
- <div class="retake-grid">${(term==='HT'?['OWN']:term==='VT'?['TP4','OWN']:['TP4','TP6','OWN']).map(p=>{
+ <div class="retake-grid">${['TP4','TP6','OWN'].map(p=>{
   const dates = calendar?.exams?.[Number(p.slice(2))];
-  const rows = summarizePlan(courses,scenario,record,year,term).retakes.filter(t=>t.period===p).sort((a,b)=>a.date.localeCompare(b.date));
+  const rows = summarizePlan(courses,scenario,record,year).retakes.filter(t=>t.period===p).sort((a,b)=>a.date.localeCompare(b.date));
   return `<article><h3>${retakeWindows[p]}</h3><p>${dates?h(intervalsLabel([dates])):p==='OWN'?'Tillfälle enligt egen planering.':'Inget verifierat tidsfönster för detta program och läsår.'}</p>
   ${rows.map(t=>`<div class="task-line"><div><b>${h(taskCourse(t,courses))}</b><small>${h(examStates[t.status])} · ${localDay(t.date)}${t.reminder?' · anmälan '+localDay(t.reminder):''}</small>${t.note?`<small>${h(t.note)}</small>`:''}${officialLink(catalog.courses.find(c=>c.code===(courses.find(c=>c.id===t.courseId)?.code || t.code))?.timeeditUrl,'TimeEdit')}</div><button data-task-edit="retakes:${t.id}">Redigera</button></div>`).join('') || '<p class="note-footer">Inga registrerade tillfällen.</p>'}
-  <button data-task-new="retakes" data-task-slot="${p}">＋ Lägg till</button></article>`;
+  </article>`;
  }).join('')}</div></section>`;
 }
 
-function completionsPanel(scenario,courses,record,year,filters,term) {
+function completionsPanel(scenario,courses,record,year,filters) {
  const validSlots = planSlots(record,year);
  const periodOptions = [...new Set([...validSlots,'SUMMER','OWN','TP4','TP6',...scenario.completions.filter(t=>t.year===year).map(t=>t.period)])];
- const all = summarizePlan(courses,scenario,record,year,term).completions;
+ const all = summarizePlan(courses,scenario,record,year).completions;
  const rows = all.filter(t=>(filters.status==='all'||(filters.status==='passed')===(t.status==='passed')) &&
   (!filters.period || filters.period===t.period) && (!filters.course || filters.course===taskCourse(t,courses)));
  const courseOptions = [...new Set(all.map(t=>taskCourse(t,courses)))];
- return `<section class="panel plan-section"><div class="panel-head"><div><p class="eyebrow">KVARSTÅENDE MOMENT</p><h2>Kompletteringar</h2></div><button data-task-new="completions">＋ Lägg till komplettering</button></div>
+ return `<section class="panel plan-section"><div class="panel-head"><h3>Kompletteringar</h3><button data-task-new="completions">＋ Lägg till komplettering</button></div>
  <p>${all.filter(t=>t.status!=='passed').length} kvarvarande moment i vyn</p>
  <div class="completion-filters">
  <label>Status<select data-task-filter="status">${planSelect([['open','Kvar'],['all','Alla'],['passed','Godkända']],filters.status)}</select></label>
@@ -132,10 +122,10 @@ function completionsPanel(scenario,courses,record,year,filters,term) {
 }
 
 function notesPanel(scenario) {
- return `<section class="panel plan-section"><h2>Samtal och uppföljning</h2><p class="note-footer" id="plan-privacy">${casePrivacy}</p>
- <details class="plan-note"><summary>Ärendets syfte och agenda</summary>${noteInput('agenda',scenario.agenda,'Agenda')}</details>
- <details class="plan-note"><summary>Planeringsöverenskommelser</summary>${noteInput('agreements',scenario.agreements,'Överenskommelser')}</details>
- <details class="plan-note"><summary>Nästa steg och uppföljning (${scenario.steps.length})</summary>
+ return `<section class="panel plan-section"><p class="note-footer" id="plan-privacy">${casePrivacy}</p>
+ <details class="plan-note" id="agenda-panel"><summary>Ärendets syfte och agenda</summary>${noteInput('agenda',scenario.agenda,'Agenda')}</details>
+ <details class="plan-note" id="agreements-panel"><summary>Planeringsöverenskommelser</summary>${noteInput('agreements',scenario.agreements,'Överenskommelser')}</details>
+ <details class="plan-note" id="next-steps-panel"><summary>Nästa steg och uppföljning (${scenario.steps.length})</summary>
  <button data-task-new="steps">＋ Lägg till nästa steg</button>
  ${scenario.steps.length?gridTable(['Uppgift','Ansvar','Datum','Status','Åtgärd'],scenario.steps.map(t=>[h(t.task),roles[t.role],localDay(t.date),stepStates[t.status],`<button data-task-edit="steps:${t.id}">Redigera</button>`])):'<p class="period-empty">Inga uppföljningar tillagda.</p>'}</details></section>`;
 }
@@ -169,33 +159,57 @@ function comparisonPanel(record,scenario,courses,other) {
   ...years.flatMap(y=>[...planSlots(record,y),'SUMMER','OWN'].map(p=>[yearText(y)+' · '+slots[p],
    load(stats,y,p)?loadLabel(load(stats,y,p)):'–',load(compared,y,p)?loadLabel(load(compared,y,p)):'–']))
  ];
- return `<details class="panel plan-section" ${other?'open':''}><summary>Jämför två scenarier</summary>
+ return `<details class="panel plan-section" id="comparison-panel" ${other?'open':''}><summary>Jämför två scenarier</summary>
  <label>Jämför med<select id="compare-scenario">${planSelect(variants.map(s=>[s.id,s.name]),comparison.id)}</select></label>
  ${gridTable(['Mått',scenario.name,comparison.name],compareRows.map(row=>row.map(h)))}</details>`;
 }
 
-export function planningWorkspace(record,scenario,allCourses,year,view,term,comparison,filters,catalog,calendarView,compact) {
+export function planningWorkspace(record,scenario,allCourses,year,comparison,filters,catalog,coursePicker) {
  const courses = allCourses.filter(c=>c.scenarioId===scenario.id);
  const active = summarizePlan(courses,scenario,record,year);
- const full = summarizePlan(courses,scenario,record);
- const visible = view==='term'?summarizePlan(courses,scenario,record,year,term):active;
- return `<header class="heading"><div><p class="eyebrow">AKTIVT ÄRENDE</p><h1>Studieplanering</h1><p>${h(caseDescription(record,catalog))}</p></div>
- <div class="actions"><button data-action="edit-case">Ändra grundinformation</button><button data-action="close-case">Stäng ärende</button></div></header>
- <section class="panel plan-toolbar" aria-label="Planeringsval"><div><h2>${h(caseTitle(record))}</h2><p>Välj scenario och läsår för arbetsytan.</p></div>
- <div class="plan-controls"><label>Aktivt scenario<select id="active-scenario">${planSelect(record.scenarios.map(s=>[s.id,s.name]),scenario.id)}</select></label>
- <button data-action="rename-scenario">Byt namn</button><button data-action="new-scenario">Skapa alternativ</button>
- ${record.scenarios.length>1?'<button class="danger-text" data-action="delete-scenario">Ta bort scenario</button>':''}
- <label>Läsår<select id="plan-year">${scenario.years.map(y=>yearOption(y,year)).join('')}</select></label><button data-action="add-year">＋ Lägg till läsår</button></div>
- <div class="plan-controls"><div class="segmented" aria-label="Visningsläge">${[['year','Läsårsöversikt'],['term','Terminsvy'],['list','Kurslista'],['calendar','Kalender']].map(([v,label])=>`<button data-plan-view="${v}" aria-pressed="${view===v}" class="${view===v?'active':''}">${label}</button>`).join('')}</div>
- <button class="primary" data-action="pick-course">＋ Lägg till kurs</button><button data-action="export">Granska och exportera</button></div></section>
- <div class="plan-shell"><div class="plan-body">
- ${view==='term'?'<div class="segmented term-tabs" aria-label="Termin">'+['HT','VT'].map(key=>`<button data-term-view="${key}" aria-pressed="${term===key}">${key} ${key==='HT'?year:year+1}</button>`).join('')+'</div>':''}
- ${view==='list'?`<section class="panel"><h2>Kurslista · ${yearText(year)}</h2>${active.courses.length?gridTable(['Kod','Kurs','HP','Läsår','Placering','Status och studietakt','Moment','Åtgärd'],active.courses.map(c=>courseRow(c,scenario,record))):'<p>Inga kurser i läsåret.</p>'}</section>`:
- view==='calendar'?calendarView():planBoard(record,scenario,active.courses,year,view,term,active.byYear[0],visible.courses)}
- ${examPanel(scenario,courses,record,year,view==='term'?term:'',catalog)}${completionsPanel(scenario,courses,record,year,filters,view==='term'?term:'')}
- ${notesPanel(scenario)}<details class="panel plan-section"><summary>Sammanställning över alla läsår</summary>
- <p>Varje kurs räknas en gång i läsårets total. Kända periodpoäng visas separat. Ofördelade kurser visas vid berörda perioder utan dubblerade poäng.</p>${yearTable(full)}</details>
- ${comparisonPanel(record,scenario,courses,comparison)}</div><aside>${planSummary(visible,year,view==='term'?term:'',compact)}</aside></div>`;
+ const program = caseProgram(record,catalog);
+ const context = [program ? program.name+' ('+program.code+')':'Eget kursval',record.studyYear?'Årskurs '+record.studyYear:'',yearText(year)].filter(Boolean).join(' · ');
+ return `<section class="workspace-intro"><p class="eyebrow">AKTIVT PLANERINGSÄRENDE</p><h1>Studieplanering</h1>
+ <p>Välj kurser och se när de ska läsas i planen.</p></section>
+ <section class="workspace-context workspace-card" aria-label="Aktivt ärende">
+ <div><small>Program och aktuellt läsår</small><strong>${h(context)}</strong></div>
+ <div class="workspace-context-actions"><button data-action="edit-case">Ändra</button>
+ <label>Plan <select id="active-scenario">${planSelect(record.scenarios.map(s=>[s.id,s.name]),scenario.id)}</select></label>
+ <button data-action="new-scenario">＋ Nytt alternativ</button>
+ <details class="workspace-menu" id="plan-menu"><summary>Mer för planen</summary><div class="workspace-menu-content">
+ <button data-action="add-year">Lägg till läsår</button><button data-action="rename-scenario">Byt namn på planen</button>
+ <button data-action="calendar">Kalenderdatum</button><button data-action="plan-details">Kurslista och belastning</button>
+ ${record.scenarios.length>1?'<button data-action="compare">Jämför scenarier</button><button class="danger-text" data-action="delete-scenario">Ta bort scenario</button>':''}</div></details></div></section>
+ <div class="workspace-columns"><aside class="workspace-card workspace-catalog" aria-labelledby="course-heading">${coursePicker}</aside>
+ <section class="workspace-plan" aria-labelledby="plan-heading"><div class="workspace-plan-head">
+ <div><h2 id="plan-heading">2. Min planering</h2><label>Läsår <select id="plan-year">${scenario.years.map(y=>yearOption(y,year)).join('')}</select></label></div>
+ <span class="plan-total-badge">${hp(active.total)} hp planerat</span>
+ <button class="mobile-course-open" data-action="pick-course">＋ Lägg till kurs</button></div>
+ ${planBoard(record,scenario,active.courses,year,active.byYear[0])}</section></div>
+ <div class="workspace-extras">
+ <details class="workspace-card workspace-disclosure" id="retakes-panel"><summary>Omtentamina <span>${active.retakes.length}</span></summary>
+ ${examPanel(scenario,courses,record,year,catalog)}</details>
+ <details class="workspace-card workspace-disclosure" id="completions-panel"><summary>Kompletteringar <span>${active.completions.length}</span></summary>
+ ${completionsPanel(scenario,courses,record,year,filters)}</details>
+ <details class="workspace-card workspace-disclosure" id="notes-panel"><summary>Anteckningar och uppföljning</summary>${notesPanel(scenario)}</details></div>
+ <section class="workspace-totals" aria-label="Sammanställning"><div><p><strong>${hp(active.total)} hp</strong> <span>Totalt planerat</span></p>
+ <p>Avklarat <b>${hp(active.done)} hp</b> <span class="total-separator">·</span> Kvar <b>${hp(active.remaining)} hp</b></p></div>
+ <button class="primary" data-action="export">Granska och exportera</button></section>
+ ${active.warnings.length?`<details class="workspace-warnings" id="workspace-warnings"><summary>Att granska (${active.warnings.length})</summary>
+ <ul>${active.warnings.map(w=>`<li><b>${h(w.kind)}</b> · ${h(w.text)}</li>`).join('')}</ul></details>`:''}
+ <p class="workspace-footnote">En kurs över flera perioder räknas en gång. Avklarade poäng är manuellt angivna.</p>`;
+}
+
+export function planDetailsDialog(record,scenario,allCourses) {
+ const courses = allCourses.filter(c=>c.scenarioId===scenario.id);
+ const stats = summarizePlan(courses,scenario,record);
+ return planDialog('Kurslista och belastning',`<div class="details-body">${courses.length?gridTable(
+ ['Kod','Kurs','HP','Läsår','Placering','Status och studietakt','Moment','Åtgärd'],courses.map(c=>courseRow(c,scenario,record))):'<p>Inga kurser i planen.</p>'}
+ <h3>Sammanställning över alla läsår</h3>${yearTable(stats)}</div><div class="dialog-actions"><button data-close>Stäng</button></div>`);
+}
+
+export function comparisonDialog(record,scenario,allCourses,other) {
+ return planDialog('Jämför scenarier',`<div class="details-body">${comparisonPanel(record,scenario,allCourses,other || record.scenarios.find(s=>s.id!==scenario.id)?.id)}</div><div class="dialog-actions"><button data-close>Stäng</button></div>`);
 }
 
 export function taskForm(kind,task,year,scenario,courses,record,preferred) {

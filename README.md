@@ -31,3 +31,19 @@ npm run pages
 ## Gränser
 
 Katalogen visar kursutbudet för 2026/27. Planen behöver följas upp mot utbildningsplan för aktuell antagningskull, Ladok, studiemedel och TimeEdit. Appen utför ingen automatisk kontroll av de uppgifterna. Webbläsarens lokala lagring kan försvinna vid rensning och synkas inte.
+
+## En arbetsyta
+
+Startsidan öppnar aktivt ärende direkt eller visar ett inbäddat startformulär. Katalogen använder samma periodordning på dator och i mobilens kursdialog. Ett valt LoT-erbjudande kan sparas med ett valfritt `offeringId` som kontrolleras mot källdatan vid läsning. Lagringsnyckeln och schema 4 behålls och äldre poster utan erbjudande-ID kan öppnas som tidigare.
+
+| Tidigare kontroll | Placering nu |
+| --- | --- |
+| `data-page`: ärendelista, planering, katalog och hjälp | Sidomenyn borttagen. Ärenden öppnas via **Öppna sparat**, kursvalet ligger intill planen, hjälp finns under **Mer**. |
+| `data-plan-view`, `data-term-view` | Dubbla presentationslägen borttagna. Höst och vår visas samtidigt. **Kalenderdatum** och **Kurslista och belastning** ligger under **Mer för planen**. |
+| `data-picker-*`, filter och lägg till | Samma sökfält och kurslista på dator och i mobilens dialog. En periodknapp begränsar kursvalet till den perioden. Kursnamnet visar källdetaljer. |
+| `data-edit`, datum, studietakt och periodpoäng | **Ändra** via kurskortet öppnar den befintliga placeringsdialogen. Drag och släpp är kvar som genväg. |
+| `data-task-*` | Omtentamina, kompletteringar och uppföljning öppnas under planen. Dubbla knappar för att lägga till omtentamen i olika rutor är borttagna. |
+| `data-action`: scenarier och läsår | Nytt alternativ och planval är synliga. Namnbyte, radering, jämförelse och läsårstillägg finns under **Mer för planen**. |
+| `data-action`: säkerhetskopia, import, hjälp och rensning | **Mer** och dialogen **Öppna sparat**. Export av Word/PDF finns intill sammanställningen. |
+
+Formgivningen följer den bifogade enkolumns-/tvåkolumnsskissen med diskreta kantlinjer, sammanhängande terminskort och en markerad fortsättning för flerperiodskurser. Ord­märket är vanlig text och en märkt plats reserveras för original­logotypen. Paketet innehöll ingen användbar originalfil för den.

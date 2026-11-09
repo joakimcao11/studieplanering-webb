@@ -19,31 +19,35 @@ export function caseDescription(record, catalog) {
   'Planeringsläsår ' + record.planningYear + '/' + (record.planningYear + 1)].filter(Boolean).join(' · ');
 }
 
-export function casesPage(data, catalog, legacy, expanded) {
- return `<header class="heading"><div><p class="eyebrow">ARBETSVERKTYG FÖR LTH-PERSONAL</p><h1>Mina studieplaneringar</h1>
- <p>Skapa en studieplanering, välj program och lägg till kurser från LTH:s kursutbud. Dina ärenden sparas lokalt utan studentnamn.</p></div>
- <div class="actions"><button class="primary" data-action="new-case">＋ Ny studieplanering</button></div></header>
- ${legacy ? `<section class="panel legacy-panel"><h2>Äldre lokala planer hittades</h2><p>Uppgifterna ligger kvar i den här webbläsaren tills du väljer att ta bort dem. Du kan fortsätta arbeta med nya ärenden.</p>
- <div class="actions"><button data-action="review-legacy">Granska och välj planer</button><button class="danger-text" data-action="remove-legacy">Ta bort äldre lagring</button>
- ${expanded ? '<button data-action="leave-legacy">Behåll och fortsätt</button>' : ''}</div></section>` : ''}
- <div class="case-workspace"><section aria-label="Sparade ärenden"><h2>Lokala ärenden</h2>
- ${sortCases(data.cases).map(c => `<article class="panel case-row"><h3>${caseTitle(c)}${c.id === data.activeCaseId ? ' <span class="pill">Aktivt</span>' : ''}</h3>
- <p>${htmlEscape(caseDescription(c, catalog))}</p><small>Senast ändrad ${dateFormat.format(new Date(c.updatedAt))} kl. ${timeFormat.format(new Date(c.updatedAt))}</small>
- <div class="actions"><button class="primary" data-case-open="${c.id}">Öppna</button><button data-case-copy="${c.id}">Skapa alternativ</button>
- <button data-case-backup="${c.id}">Exportera ärendet som JSON</button><button class="danger-text" data-case-delete="${c.id}">Ta bort</button></div></article>`).join('')
- || '<div class="panel"><h3>Inga sparade ärenden</h3><p>Skapa en studieplanering eller öppna ett tidigare ärende från en JSON-säkerhetskopia.</p></div>'}</section>
- <aside class="panel case-tools"><h2>Öppna tidigare ärende</h2><p>Importera en namnfri JSON-säkerhetskopia från en annan webbläsare eller enhet.</p>
- <button data-action="import">Importera JSON</button><button data-action="backup-all" ${data.cases.length ? '' : 'disabled'}>Exportera alla ärenden som JSON</button>
- <button data-page="catalog">Utforska LTH:s kurskatalog</button>
- <details><summary>Så fungerar lokalt sparande</summary><p>Planerna finns i den här webbläsarprofilen. De synkas inte och kan försvinna om webbläsardata rensas. Även namnfria uppgifter kan identifiera någon i kombination med annan information.</p></details>
- <button class="danger-text" data-action="clear-cases">Rensa alla lokala ärenden</button></aside></div>`;
+export function startCaseForm(catalog,defaultYear) {
+ return `<section class="workspace-intro"><p class="eyebrow">INTERNT PLANERINGSSTÖD</p><h1>Studieplanering</h1><p>Välj program och läsår för att börja planera.</p></section>
+ <section class="workspace-card start-card"><form id="case-form">
+ <div class="start-fields"><label>Program<select name="programmeId"><option value="">Eget kursval</option>${programmeOptions(catalog,'')}</select></label>
+ <label>Planeringsläsår<input name="planningYear" type="number" min="1950" max="2100" value="${defaultYear}" required></label></div>
+ <details class="start-optional"><summary>Årskurs och antagningsår (valfritt)</summary><div class="start-fields"><label>Årskurs<input type="number" name="studyYear" min="1" max="20"></label>
+ <label>Antagningsår<input type="number" name="admissionYear" min="1950" max="2100"></label></div></details>
+ <p id="form-error" class="error" role="alert"></p><button type="submit" class="primary">Börja planera</button>
+ <p class="workspace-footnote">Ärendet sparas lokalt i den här webbläsaren utan studentnamn.</p>
+ </form></section>`;
+}
+
+export function savedCases(data,catalog,legacy) {
+ return `<div class="dialog-head"><h2 id="editor-title">Öppna sparat ärende</h2><button data-close aria-label="Stäng">✕</button></div>
+ <div class="details-body saved-case-list">
+ ${sortCases(data.cases).map(c=>`<article class="saved-case">
+ <div><strong>${caseTitle(c)}</strong>${c.id===data.activeCaseId?' <span class="source-period">Aktivt</span>':''}
+ <p>${htmlEscape(caseDescription(c,catalog))}</p><small>Ändrad ${dateFormat.format(new Date(c.updatedAt))} kl. ${timeFormat.format(new Date(c.updatedAt))}</small></div>
+ <div class="actions"><button data-case-open="${c.id}">Öppna</button><details class="saved-case-actions"><summary>Mer</summary>
+ <div class="actions"><button data-case-backup="${c.id}">Exportera JSON</button><button class="danger-text" data-case-delete="${c.id}">Ta bort</button></div></details></div></article>`).join('') || '<p>Inga sparade ärenden i den här webbläsaren.</p>'}
+ ${legacy?'<p>Äldre planer finns på den här enheten.</p><button data-action="review-legacy">Granska äldre planer</button>':''}</div>
+ <div class="dialog-actions"><button data-close>Stäng</button><button data-action="import">Importera JSON</button></div>`;
 }
 
 export function caseForm(catalog, record, defaultYear) {
  const r = record || { programmeId: '', planningYear: defaultYear, targetCredits: 60 };
  const programmes = programmeOptions(catalog, r.programmeId);
  return `<div class="dialog-head"><h2 id="editor-title">${record ? 'Ändra grundinformation' : 'Ny studieplanering'}</h2><button data-close aria-label="Stäng">✕</button></div>
- <form id="case-form"><p class="form-intro">Grundinformationen sparas lokalt. Studentens namn kan anges tillfälligt i dokumentexporten.</p>
+ <form id="case-form" data-editing="${Boolean(record)}"><p class="form-intro">Grundinformationen sparas lokalt. Studentens namn kan anges tillfälligt i dokumentexporten.</p>
  <label>Program<select name="programmeId" autofocus><option value="">Ej valt / annan utbildning</option>
  ${r.programmeId && !caseProgram(r,catalog) ? `<option selected value="${htmlEscape(r.programmeId)}">Okänd programkod (${htmlEscape(r.programmeId)})</option>` : ''}${programmes}</select></label>
  <div class="form-grid"><label>Antagningsår<input type="number" name="admissionYear" min="1950" max="2100" value="${r.admissionYear ?? ''}" placeholder="Valfritt"><small>Året då utbildningen påbörjades.</small></label>

@@ -9,7 +9,7 @@ const tableBlock = (labels,weights,rows) => ({kind:'table',labels,weights,rows:r
 const sourcePlacementText = (c,source) => {
  if (!c.catalogYear) return 'Manuellt tillagd';
  const termOnly = programmeStructure(c.programmeId,c.catalogYear).periods==='terms';
- const offers = source?.offerings.filter(o=>o.programmeId===c.programmeId) || [];
+ const offers = source?.offerings.filter(o=>o.programmeId===c.programmeId && (!c.offeringId || o.sourceId===c.offeringId)) || [];
  const context = [...new Set(offers.flatMap(o=>[choiceLabels[o.choice],!o.general&&o.specializationName]).filter(Boolean))];
  return [c.programmeId,periodLabel(c.periods,termOnly),source?.level,...context].filter(Boolean).join(' · ');
 };
@@ -115,7 +115,7 @@ export function createPlanningSnapshot({record,scenarios,courses,catalog,year=nu
   if (detail && settings.includeSources) {
    const sourced = ordered.filter(c=>c.catalogYear).map(c=>{
     const official = catalog.courses.find(x=>x.code===c.code);
-    const offers = official?.offerings.filter(o=>o.programmeId===c.programmeId) || [];
+    const offers = official?.offerings.filter(o=>o.programmeId===c.programmeId && (!c.offeringId || o.sourceId===c.offeringId)) || [];
     const annotations = [...new Set(offers.map(o=>o.footnote).filter(Boolean))];
     return [c.code, [official?.syllabusUrl,...annotations].filter(Boolean).join('\n')];
    });

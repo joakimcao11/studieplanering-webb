@@ -1,11 +1,11 @@
 import { months, period, intersects, visibleCourses, validateCourse, switchedYear, moveCourse } from './model.js';
 import { CASE_KEY, LEGACY_KEY, emptyWorkspace, newId, cleanCase, loadWorkspace, saveWorkspace, caseBackup, importCases, cleanPlannedCourse, legacyChoices, migrateLegacy, exportPreferences } from './cases.js';
-import { savedCases, startCaseForm, caseForm, caseProgram, casePrivacy } from './case-view.js';
+import { savedCases, startCaseForm, caseForm, caseProgram, casePrivacy, caseDescription, caseTitle } from './case-view.js';
 import { coursePanel, catalogResults, catalogCourseDetails, htmlEscape, officialLink } from './catalog-view.js';
 import { downloadFile } from './exports.js';
 import { openExportPanel } from './export-ui.js';
 import { initialScenario, scenarioFor, scenarioCourses, validateTask, copyScenario, planSlots, slots, hasKey, yearOf, yearText, isPlanYear, plannedLabel, placementLabel, planningDates, datesForSlots } from './planning.js';
-import { planningWorkspace, comparisonDialog, planDetailsDialog, taskForm, planDialog, formEnd } from './planning-view.js';
+import { planningWorkspace, notesPanel, comparisonDialog, planDetailsDialog, taskForm, planDialog, formEnd } from './planning-view.js';
 import { courseDraft, placementForm, sourcePlacementButtons } from './course-placement-ui.js';
 import { createPlanningSnapshot } from './planning-export.js';
 
@@ -32,6 +32,7 @@ const activeCase = () => data.cases.find(c => c.id === data.activeCaseId);
 let mode = 'academic', year = activeCase()?.planningYear ?? defaultYear;
 let selected = year + '-08', dragged = null;
 let comparison = '', mobilePicker = false, preferredSlot = '';
+let workspaceView = 'planning';
 let completionFilters = {status:'open',period:'',course:''};
 const activeScenario = () => scenarioFor(activeCase());
 let planYear = activeScenario()?.years.includes(year) ? year : activeScenario()?.years[0] ?? year;
@@ -70,6 +71,7 @@ function setActive(id) {
  completionFilters = {status:'open',period:'',course:''};
  filter = defaultFilter();
  preferredSlot = '';
+ if (!id) workspaceView = 'planning';
 }
 
 function toast(message,undo){const t=document.querySelector('#toast');t.replaceChildren(document.createTextNode(message));if(undo){const b=document.createElement('button');b.textContent='Ångra';b.onclick=()=>{undo();const ok=save();render();toast(ok?'Ändringen har ångrats.':'Ändringen ångrades i arbetsytan. Sparning misslyckades.');};t.append(b);}t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),undo?12000:5000);}
@@ -207,24 +209,52 @@ function refreshCoursePanels(control) {
  if (control) (dialog.open?dialog:document).querySelector('[data-catalog-filter="'+control+'"]')?.focus();
 }
 
+const navigation = [
+ ['meeting','Mötesanteckning','<path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6m-6 4h6"/>'],
+ ['planning','Studieplanering','<path d="m2 10 10-5 10 5-10 5zM6 12v5c3 2 9 2 12 0v-5m4-2v6"/>'],
+ ['calendar','Kalender','<rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4m8-4v4M4 10h16m-11 5h2m3 0h2"/>'],
+];
+
+function meetingView(record) {
+ const scenario = activeScenario();
+ return `<div class="meeting-view"><section class="workspace-card meeting-card">
+ <h1>Mötesanteckning</h1><p class="muted">Spara och återuppta en studieplan med ett ärende-ID.</p>
+ <div class="actions"><button data-action="new-case">＋ Nytt ärende</button><button data-action="saved-cases">Öppna sparat</button></div>
+ <p>${record?`${esc(caseTitle(record))} · ${esc(scenario.name)}`:'Inget aktivt ärende.'}</p></section>
+ ${record?`<section class="workspace-card meeting-card"><h2>Grundinformation</h2><p>${esc(caseDescription(record,catalog))}</p>
+ <div class="actions"><button data-action="edit-case">Ändra grundinformation</button></div></section>
+ <section class="workspace-card meeting-card"><h2>Anteckningar och uppföljning</h2>${notesPanel(scenario,true)}</section>
+ <section class="workspace-card meeting-card meeting-export"><div><h2>Exportera mötesanteckning</h2><p class="muted">Granska dokumentet och välj PDF eller Word.</p></div>
+ <button class="primary" data-action="export">Granska och exportera</button></section>`:''}</div>`;
+}
+
 function render(focusHeading = false) {
  const app = document.querySelector('#app');
- const open = new Map([...app.querySelectorAll('details[id]')].map(el=>[el.id,el.open]));
- app.innerHTML = `<div class="workspace-frame"><header class="workspace-header">
- <div class="workspace-brand"><span class="brand-reserved" aria-label="Plats för originalets logotyp">Logotyp</span>
- <div><strong>Studieplanering</strong><small>Internt planeringsstöd för LTH-personal</small></div></div>
+ const open = app.dataset.view===workspaceView ? [...app.querySelectorAll('details[id]')].map(el=>[el.id,el.open]) : [];
+ app.dataset.view = workspaceView;
+ const record = activeCase();
+ app.innerHTML = `<div class="workspace-shell"><header class="workspace-masthead"><div class="workspace-frame workspace-header">
+ <div class="workspace-brand"><strong>Studieplaneringsverktyg</strong><small>Studie- och karriärvägledning</small></div>
  <div class="workspace-header-actions"><span id="save-status" role="status" data-save-error="${storageError}">${saveLabel()}</span>
  <button data-action="new-case">＋ Nytt ärende</button><button data-action="saved-cases">Öppna sparat</button>
  <details class="workspace-menu" id="workspace-menu"><summary>Mer</summary><div class="workspace-menu-content">
  <button data-action="import">Importera JSON</button><button data-action="backup-all" ${data.cases.length?'':'disabled'}>Exportera alla ärenden som JSON</button>
  ${activeCase()?'<button data-case-backup="'+activeCase().id+'">Exportera aktuellt ärende som JSON</button><button data-action="close-case">Stäng ärendet</button>':''}
  ${legacy?'<button data-action="review-legacy">Granska äldre planer</button><button class="danger-text" data-action="remove-legacy">Ta bort äldre lagring</button>':''}
- <button data-action="help">Så fungerar det</button><button class="danger-text" data-action="clear-cases">Rensa alla lokala ärenden</button></div></details></div></header>
- <main id="main" class="workspace-main" tabindex="-1">
+ <button data-action="help">Så fungerar det</button><button class="danger-text" data-action="clear-cases">Rensa alla lokala ärenden</button></div></details></div></div></header>
+ <div class="workspace-nav"><nav class="workspace-frame" aria-label="Huvudnavigering">${navigation.map(([view,label,icon])=>
+ `<button data-workspace-view="${view}" ${view===workspaceView?'aria-current="page"':''}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${icon}</svg>${label}</button>`).join('')}</nav></div>
+ <main id="main" class="workspace-frame workspace-main" tabindex="-1">
  ${readError?'<p class="notice" role="alert">Sparade ärenden kunde inte läsas. Lagringen skrivs inte över. Rensning finns under Mer.</p>':
  storageError?'<p class="notice" role="alert">Sparning misslyckades. Säkerhetskopiera arbetsytan som JSON innan du laddar om.</p>':''}
- ${activeCase()?planView():startCaseForm(catalog,defaultYear)}</main></div>`;
- for (const details of app.querySelectorAll('details[id]')) if (open.has(details.id)) details.open = open.get(details.id);
+ ${workspaceView==='meeting'?meetingView(record):workspaceView==='calendar'?`<div id="workspace-calendar">
+ <section class="workspace-intro"><h1>Kalender</h1><p>Visa planeringen som kalenderår, läsår eller termin.</p></section>
+ ${record?`<div id="calendar-content">${calendarPanelView()}</div>`:'<section class="workspace-card meeting-card"><h2>Inget aktivt ärende</h2><p>Skapa eller öppna ett ärende för att se kurser i kalendern.</p><div class="actions"><button data-action="new-case">＋ Nytt ärende</button><button data-action="saved-cases">Öppna sparat</button></div></section>'}</div>`:record?planView():startCaseForm(catalog,defaultYear)}</main>
+ <footer class="workspace-footer"><div class="workspace-frame"><span>Studie- och karriärvägledning · Studieplanering</span><span>Lokal arbetsyta</span></div></footer></div>`;
+ for (const [id,isOpen] of open) {
+  const details = document.getElementById(id);
+  if (details && app.contains(details)) details.open = isOpen;
+ }
  if (focusHeading) {
   const heading = app.querySelector('h1');
   heading.tabIndex = -1;
@@ -237,7 +267,7 @@ function openCalendar() {
 }
 
 function refreshCalendar(control) {
- const host = dialog.querySelector('#calendar-content');
+ const host = dialog.querySelector('#calendar-content') || document.querySelector('#workspace-calendar #calendar-content');
  if (!host) return;
  host.innerHTML = calendarPanelView();
  if (control) host.querySelector(control)?.focus({preventScroll:true});
@@ -467,6 +497,7 @@ function updateCase(form,values) {
   data.cases.push(record);
  }
  setActive(record.id);
+ if (!editing) workspaceView = 'planning';
  save();
  if (dialog.open) dialog.close();
  render(true);
@@ -585,8 +616,12 @@ document.addEventListener('click', event => {
  const button = event.target.closest('button');
  if (!button) return;
  const b = button.dataset;
+ if (b.workspaceView) {
+  if (workspaceView!==b.workspaceView) { workspaceView = b.workspaceView; render(true); }
+  return;
+ }
  if ('close' in b) { dialog.close(); return; }
- if (b.caseOpen) { setActive(b.caseOpen); save(); dialog.close(); render(true); return; }
+ if (b.caseOpen) { setActive(b.caseOpen); workspaceView = 'planning'; save(); dialog.close(); render(true); return; }
  if (b.caseDelete) { deleteCase(b.caseDelete); return; }
  if (b.caseBackup) { exportJSON(b.caseBackup); return; }
  if (b.mode) { year = switchedYear(mode,b.mode,year,selected); mode = b.mode; refreshCalendar('[data-mode="'+mode+'"]'); return; }

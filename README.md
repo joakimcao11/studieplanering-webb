@@ -38,12 +38,12 @@ Startsidan öppnar aktivt ärende direkt eller visar ett inbäddat startformulä
 
 | Tidigare kontroll | Placering nu |
 | --- | --- |
-| `data-page`: ärendelista, planering, katalog och hjälp | Sidomenyn borttagen. Ärenden öppnas via **Öppna sparat**, kursvalet ligger intill planen, hjälp finns under **Mer**. |
-| `data-plan-view`, `data-term-view` | Dubbla presentationslägen borttagna. Höst och vår visas samtidigt. **Kalenderdatum** och **Kurslista och belastning** ligger under **Mer för planen**. |
+| Ärenden, planering, katalog och hjälp | Flikarna **Mötesanteckning**, **Studieplanering** och **Kalender** delar det aktiva ärendet. Ärenden öppnas via **Öppna sparat**. Kursvalet ligger intill planen och hjälp finns under **Mer**. |
+| Terminer och kalender | Höst och vår visas samtidigt i planeringen. **Kalender** har vyer för kalenderår, läsår, höst och vår. **Kurslista och belastning** öppnas från sammanställningen. |
 | `data-picker-*`, filter och lägg till | Samma sökfält och kurslista på dator och i mobilens dialog. En periodknapp begränsar kursvalet till den perioden. Kursnamnet visar källdetaljer. |
 | `data-edit`, datum, studietakt och periodpoäng | **Ändra** via kurskortet öppnar den befintliga placeringsdialogen. Drag och släpp är kvar som genväg. |
 | `data-task-*` | Omtentamina, kompletteringar och uppföljning öppnas under planen. Dubbla knappar för att lägga till omtentamen i olika rutor är borttagna. |
 | `data-action`: scenarier och läsår | Nytt alternativ och planval är synliga. Namnbyte, radering, jämförelse och läsårstillägg finns under **Mer för planen**. |
 | `data-action`: säkerhetskopia, import, hjälp och rensning | **Mer** och dialogen **Öppna sparat**. Export av Word/PDF finns intill sammanställningen. |
 
-Formgivningen följer den bifogade enkolumns-/tvåkolumnsskissen med diskreta kantlinjer, sammanhängande terminskort och en markerad fortsättning för flerperiodskurser. Ord­märket är vanlig text och en märkt plats reserveras för original­logotypen. Paketet innehöll ingen användbar originalfil för den.
+Formgivningen följer personalpilotens marinblå sidhuvud, flikrad, kort och ljusa arbetsyta. Inter levereras lokalt med [SIL Open Font License](dist/vendor/Inter-OFL.txt). Layouten använder det befintliga lokala ärendeformatet och samma beräkningar som dokumentexporten.

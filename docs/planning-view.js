@@ -121,13 +121,25 @@ function completionsPanel(scenario,courses,record,year,filters) {
  `<button data-task-edit="completions:${t.id}">Redigera</button>`])):'<p class="period-empty">Inga kompletteringar för valt filter.</p>'}</section>`;
 }
 
-function notesPanel(scenario) {
+export function notesPanel(scenario, expanded = false) {
  return `<section class="panel plan-section"><p class="note-footer" id="plan-privacy">${casePrivacy}</p>
- <details class="plan-note" id="agenda-panel"><summary>Ärendets syfte och agenda</summary>${noteInput('agenda',scenario.agenda,'Agenda')}</details>
- <details class="plan-note" id="agreements-panel"><summary>Planeringsöverenskommelser</summary>${noteInput('agreements',scenario.agreements,'Överenskommelser')}</details>
- <details class="plan-note" id="next-steps-panel"><summary>Nästa steg och uppföljning (${scenario.steps.length})</summary>
+ <details class="plan-note" id="agenda-panel" ${expanded?'open':''}><summary>Ärendets syfte och agenda</summary>${noteInput('agenda',scenario.agenda,'Agenda')}</details>
+ <details class="plan-note" id="agreements-panel" ${expanded?'open':''}><summary>Planeringsöverenskommelser</summary>${noteInput('agreements',scenario.agreements,'Överenskommelser')}</details>
+ <details class="plan-note" id="next-steps-panel" ${expanded?'open':''}><summary>Nästa steg och uppföljning (${scenario.steps.length})</summary>
  <button data-task-new="steps">＋ Lägg till nästa steg</button>
  ${scenario.steps.length?gridTable(['Uppgift','Ansvar','Datum','Status','Åtgärd'],scenario.steps.map(t=>[h(t.task),roles[t.role],localDay(t.date),stepStates[t.status],`<button data-task-edit="steps:${t.id}">Redigera</button>`])):'<p class="period-empty">Inga uppföljningar tillagda.</p>'}</details></section>`;
+}
+
+function summaryCard(active,record,year) {
+ const row = active.byYear[0];
+ return `<aside class="workspace-card plan-summary" aria-label="Sammanställning för läsåret">
+ <h3>Sammanställning</h3>
+ <div class="summary-total"><strong>${hp(active.total)}</strong><span>totalt hp · ${yearText(year)}</span></div>
+ <label for="annual-progress">Planerat mot målet ${hp(record.targetCredits)} hp</label>
+ <progress id="annual-progress" value="${Math.min(active.total,record.targetCredits)}" max="${record.targetCredits}">${hp(active.total)} hp</progress>
+ <dl><div><dt>Avklarat</dt><dd>${hp(active.done)} hp</dd></div><div><dt>Kvar</dt><dd>${hp(active.remaining)} hp</dd></div></dl>
+ <dl>${planSlots(record,year).map(slot=>`<div><dt>${h(slots[slot])}</dt><dd>${h(loadLabel(row.slots[slot]))}</dd></div>`).join('')}</dl>
+ <button data-action="plan-details">Kurslista och belastning</button></aside>`;
 }
 
 function yearTable(stats) {
@@ -168,24 +180,27 @@ export function planningWorkspace(record,scenario,allCourses,year,comparison,fil
  const courses = allCourses.filter(c=>c.scenarioId===scenario.id);
  const active = summarizePlan(courses,scenario,record,year);
  const program = caseProgram(record,catalog);
- const context = [program ? program.name+' ('+program.code+')':'Eget kursval',record.studyYear?'Årskurs '+record.studyYear:'',yearText(year)].filter(Boolean).join(' · ');
- return `<section class="workspace-intro"><p class="eyebrow">AKTIVT PLANERINGSÄRENDE</p><h1>Studieplanering</h1>
- <p>Välj kurser och se när de ska läsas i planen.</p></section>
- <section class="workspace-context workspace-card" aria-label="Aktivt ärende">
- <div><small>Program och aktuellt läsår</small><strong>${h(context)}</strong></div>
- <div class="workspace-context-actions"><button data-action="edit-case">Ändra</button>
+ const programme = program ? program.name+' ('+program.code+')':'Eget kursval';
+ const studyContext = [record.studyYear?'Årskurs '+record.studyYear:'',yearText(year)].filter(Boolean).join(' · ');
+ return `<div class="workspace-overview"><section class="workspace-intro"><h1>Studieplanering</h1>
+ <p>Placera kurser per termin och läsperiod. Dra och släpp för att flytta dem.</p></section>
+ <div class="workspace-context-actions">
  <label>Plan <select id="active-scenario">${planSelect(record.scenarios.map(s=>[s.id,s.name]),scenario.id)}</select></label>
  <button data-action="new-scenario">＋ Nytt alternativ</button>
  <details class="workspace-menu" id="plan-menu"><summary>Mer för planen</summary><div class="workspace-menu-content">
  <button data-action="add-year">Lägg till läsår</button><button data-action="rename-scenario">Byt namn på planen</button>
- <button data-action="calendar">Kalenderdatum</button><button data-action="plan-details">Kurslista och belastning</button>
- ${record.scenarios.length>1?'<button data-action="compare">Jämför scenarier</button><button class="danger-text" data-action="delete-scenario">Ta bort scenario</button>':''}</div></details></div></section>
- <div class="workspace-columns"><aside class="workspace-card workspace-catalog" aria-labelledby="course-heading">${coursePicker}</aside>
- <section class="workspace-plan" aria-labelledby="plan-heading"><div class="workspace-plan-head">
- <div><h2 id="plan-heading">2. Min planering</h2><label>Läsår <select id="plan-year">${scenario.years.map(y=>yearOption(y,year)).join('')}</select></label></div>
+ <button data-action="calendar">Kalenderdatum</button>
+ ${record.scenarios.length>1?'<button data-action="compare">Jämför scenarier</button><button class="danger-text" data-action="delete-scenario">Ta bort scenario</button>':''}</div></details></div></div>
+ <div class="workspace-columns"><div class="course-column">
+ <section class="workspace-context workspace-card" aria-label="Aktivt ärende">
+ <h2>Program</h2><strong>${h(programme)}</strong><small>${h(studyContext)}</small>
+ <button data-action="edit-case">Ändra</button></section>
+ <aside class="workspace-card workspace-catalog" aria-labelledby="course-heading">${coursePicker}</aside></div>
+ <section class="workspace-plan" aria-labelledby="plan-heading"><div class="workspace-plan-head workspace-card">
+ <div><h2 id="plan-heading">Stöd i studieplanering</h2><label>Läsår <select id="plan-year">${scenario.years.map(y=>yearOption(y,year)).join('')}</select></label></div>
  <span class="plan-total-badge">${hp(active.total)} hp planerat</span>
  <button class="mobile-course-open" data-action="pick-course">＋ Lägg till kurs</button></div>
- ${planBoard(record,scenario,active.courses,year,active.byYear[0])}</section></div>
+ <div class="plan-with-summary"><div class="term-stack">${planBoard(record,scenario,active.courses,year,active.byYear[0])}</div>${summaryCard(active,record,year)}</div></section></div>
  <div class="workspace-extras">
  <details class="workspace-card workspace-disclosure" id="retakes-panel"><summary>Omtentamina <span>${active.retakes.length}</span></summary>
  ${examPanel(scenario,courses,record,year,catalog)}</details>

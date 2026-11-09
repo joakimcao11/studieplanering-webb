@@ -42,7 +42,7 @@ export function coursePanel(catalog, record, filter, courses, modal = false) {
  const levels = [...new Set(offerings.map(({course})=>course.level).filter(Boolean))].sort();
  const scopeOptions = termOnly ? [['HT','Hösttermin'],['VT','Vårtermin']] : [1,2,3,4].map(p=>[p,'LP'+p]);
  return `<div class="course-panel-content">
- <div class="workspace-panel-heading">${modal?'': '<h2 id="course-heading">1. Välj kurser</h2>'}<small>${htmlEscape(program?.name || 'Eget kursval')}${filter.year?' · Åk '+htmlEscape(filter.year):''}</small></div>
+ <div class="workspace-panel-heading">${modal?'': '<h2 id="course-heading">Lägg till kurs</h2>'}<small>${htmlEscape(program?.name || 'Eget kursval')}${filter.year?' · Åk '+htmlEscape(filter.year):''}</small></div>
  <label class="catalog-query"><span class="sr-only">Sök kursnamn eller kurskod</span><input type="search" data-catalog-query aria-label="Sök kursnamn eller kurskod" placeholder="Sök kursnamn eller kurskod" value="${htmlEscape(filter.q)}" ${modal?'autofocus':''}></label>
  <div class="catalog-basic">${catalogSelect('year','Årskurs',years.map(y=>[y,'Årskurs '+y]),filter.year,'Alla årskurser')}
  ${catalogSelect('category','Kurskategori',Object.entries(categoryLabels),filter.category,'Alla kurser')}</div>

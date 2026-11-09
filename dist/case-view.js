@@ -20,15 +20,15 @@ export function caseDescription(record, catalog) {
 }
 
 export function startCaseForm(catalog,defaultYear) {
- return `<section class="workspace-intro"><p class="eyebrow">INTERNT PLANERINGSSTÖD</p><h1>Studieplanering</h1><p>Välj program och läsår för att börja planera.</p></section>
- <section class="workspace-card start-card"><form id="case-form">
+ return `<div class="start-view"><section class="workspace-intro"><h1>Studieplanering</h1><p>Välj program och läsår för att börja planera.</p></section>
+ <section class="workspace-card start-card"><h2>Grundinformation</h2><form id="case-form">
  <div class="start-fields"><label>Program<select name="programmeId"><option value="">Eget kursval</option>${programmeOptions(catalog,'')}</select></label>
  <label>Planeringsläsår<input name="planningYear" type="number" min="1950" max="2100" value="${defaultYear}" required></label></div>
  <details class="start-optional"><summary>Årskurs och antagningsår (valfritt)</summary><div class="start-fields"><label>Årskurs<input type="number" name="studyYear" min="1" max="20"></label>
  <label>Antagningsår<input type="number" name="admissionYear" min="1950" max="2100"></label></div></details>
  <p id="form-error" class="error" role="alert"></p><button type="submit" class="primary">Börja planera</button>
  <p class="workspace-footnote">Ärendet sparas lokalt i den här webbläsaren utan studentnamn.</p>
- </form></section>`;
+ </form></section></div>`;
 }
 
 export function savedCases(data,catalog,legacy) {

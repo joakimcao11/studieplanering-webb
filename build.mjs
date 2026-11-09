@@ -6,7 +6,7 @@ let html = read('index.html');
 const styles = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)];
 const css = styles.map(match => read(match[1])).join('\n');
 styles.forEach(([tag],index) => { html = html.replace(tag, () => index ? '' : '<style>' + css + '</style>'); });
-const modules = ['model.js','cases.js','lth-calendar.js','program-catalog.js','catalog-view.js','case-view.js','export-settings.js','exports.js','export-ui.js','app-v2.js'];
+const modules = ['model.js','planning.js','cases.js','lth-calendar.js','program-catalog.js','catalog-view.js','case-view.js','planning-view.js','course-placement-ui.js','export-settings.js','planning-export.js','exports.js','export-ui.js','app-v2.js'];
 const strip = value => value.replace(/^\uFEFF/,'').replace(/^import .*?;\r?\n/gm,'').replace(/^export /gm,'');
 const combined = modules.map(name => strip(read(name))).join('\n');
 new Function(combined);

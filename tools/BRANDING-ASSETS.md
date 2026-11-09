@@ -1,21 +1,7 @@
-# Exportmallarnas logotyper
+# Dokumentmallar
 
-## LTH-mall
+Den neutrala mallen är standard. LTH och LU finns som textmallar utan förifyllda vägledarnamn eller kontaktuppgifter. Anpassad mall kan använda en godkänd bild som vägledaren väljer lokalt. Logotyp och dokumentfält lämnar webbläsaren först när användaren laddar ned ett dokument.
 
-`dist/assets/branding-lth.png` är hela bildobjektet `Im1.jpg` från sidan 1 i användarens referens-PDF `Studieplanering_JC_2026-10-28.pdf`. Bildobjektet extraherades lokalt med pypdf och sparades i PNG-format utan beskärning eller förändrad grafik. Originalets pixelmått är 203 × 111. Den låga upplösningen kommer från referensfilen.
+Lunds universitet beskriver godkända logotyper, frizon och minsta storlek i sin grafiska vägledning. Använd rätt logotyp och mall för dokumentets sammanhang.
 
-## LU-mall
-
-`dist/assets/branding-lu.png` är den oförändrade svenska svarta huvudlogotypen `LU-logotyp-tryck-digitalt/PNG_for_digital_anvandning/Svenska/Lunds_universitet_C2r_SVART.png` ur universitetets offentliga logotyppaket:
-
-https://www.medarbetarwebben.lu.se/sites/medarbetarwebben.lu.se/files/lu-logotyp-tryck-digitalt.zip
-
-Källsida: https://www.medarbetarwebben.lu.se/node/110
-
-Hämtad 2026-10-28. Originalets pixelmått är 714 × 860. Bilden har transparent bakgrund. `branding-lu-proof.png` visar samma logotyp mot vit bakgrund enbart för visuell kontroll. Ingen egen logotyp har konstruerats.
-
-## Inbäddning
-
-`dist/branding-assets.js` exponerar `window.STUDIE_BRANDING` med fälten `lth` och `lu`. Varje fält innehåller `dataUrl`, `width`, `height` och `source`. Exportmallar ska behålla bildens proportioner och placera den på vit eller enkel bakgrund.
-
-Logotypernas grafiska element är universitetets material. Källsidan anger bland annat att godkända logotyper inte ska modifieras och att friyta ska lämnas runt dem. Användning i en lokalt anpassad dokumentmall är inte en verifiering av att mallen är universitetets officiella dokumentmall.
+[Logotyper och grafiska regler på LU:s Medarbetarwebb](https://www.medarbetarwebben.lu.se/node/110)

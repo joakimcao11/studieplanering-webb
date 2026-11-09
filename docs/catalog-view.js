@@ -46,7 +46,7 @@ export function catalogPage(catalog, filter, activeCase, selectedMonth) {
    ${structure.periods === 'terms' ? '<p class="note-footer">Programmet följer terminstider utan läsperioder.</p>' : catalogSelect('lp', 'Läsperiod i källan', [1,2,3,4].map(n => [n,'LP'+n]), filter.lp, 'Alla läsperioder')}
    ${catalogSelect('status', 'Kursstatus', [...Object.entries(sourceStatusLabels), ['preliminary','Preliminär']], filter.status, 'Alla statusar')}
    <button data-action="reset-filters">Återställ filter</button>
-   ${activeCase ? `<label>Planeringsmånad<input id="catalog-month" type="month" value="${htmlEscape(selectedMonth)}"></label>` : ''}
+   ${activeCase ? `<label>Månad vid egen placering<input id="catalog-month" type="month" value="${htmlEscape(selectedMonth)}"></label>` : ''}
   </details>
   <section class="catalog-content" aria-label="Programkurser">
    <div class="panel catalog-source"><h2>${p ? htmlEscape(p.name + ' (' + p.code + ')') : 'Välj ett program'}</h2>

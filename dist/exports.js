@@ -16,10 +16,23 @@ export function exportSnapshot(student,courses,scope,catalog,options={}){
  const completed=c=>c.status==='done'?c.credits:Math.min(c.credits,Math.max(0,Number(c.completedCredits)||0));
  return {title:settings.documentTitle,student:{...student},scope,created:settings.date,settings,courses:rows,total:rows.reduce((n,c)=>n+c.credits,0),done:rows.reduce((n,c)=>n+completed(c),0),source:catalog?`LTH kursutbud ${catalog.academicYearLabel}. Hämtat ${catalog.fetchedAt.slice(0,10)}. Källa: ${catalog.sourceUrl}`:'Egna planeringsuppgifter.'};
 }
-function exportLogo(settings){return settings.template==='custom'?(settings.customLogo?{dataUrl:settings.customLogo,width:settings.logoWidth||160,height:settings.logoHeight||70}:null):globalThis.STUDIE_BRANDING?.[settings.template]||null;}
-function tableValue(c,key){return key==='credits'?c.creditsLabel:String(c[key]??'');}
+function exportLogo(settings) {
+ if (settings.template!=='custom' || !settings.customLogo) return null;
+ return {dataUrl:settings.customLogo,width:settings.logoWidth||160,height:settings.logoHeight||70};
+}
+function exportContent(snapshot) {
+ if (snapshot.blocks) return snapshot;
+ const {settings,courses,student} = snapshot;
+ const columns = exportColumns(settings);
+ return {...snapshot,documentInfo:settings.includeStudent?[student.name,student.program,student.year].filter(Boolean):[],
+  blocks:[{kind:'heading',text:'Handlingsplan – kurser'},
+   {kind:'table',labels:columns.map(c=>c.label),weights:columns.map(c=>c.weight),
+    rows:courses.length?courses.map(c=>columns.map(col=>String(col.key==='credits'?c.creditsLabel:c[col.key]??''))):[columns.map((_,i)=>i===1?'Inga kurser.':'')]},
+   ...(settings.includeNotes && student.note ? [{kind:'heading',text:'Anteckningar och nästa steg'},{kind:'paragraph',text:student.note}]:[])]};
+}
 export async function exportScene(s,lib=globalThis.PDFLib){
  if(!lib)throw Error('PDF-stödet kunde inte laddas.');
+ s = exportContent(s);
  const pdf=await lib.PDFDocument.create(),serif=s.settings.template==='lu';
  let normal,bold;
  if(globalThis.fontkit&&globalThis.STUDIE_FONTS){pdf.registerFontkit(globalThis.fontkit);const bytes=v=>Uint8Array.from(atob(v),c=>c.charCodeAt(0));normal=await pdf.embedFont(bytes(globalThis.STUDIE_FONTS.regular),{subset:true});bold=await pdf.embedFont(bytes(globalThis.STUDIE_FONTS.bold),{subset:true});}
@@ -39,20 +52,57 @@ export async function exportScene(s,lib=globalThis.PDFLib){
  addPage();
  if(s.settings.includeContact){const contact=[s.settings.postal&&'Postadress '+s.settings.postal,s.settings.visit&&'Besöksadress '+s.settings.visit,s.settings.phone&&'Telefon '+s.settings.phone,s.settings.email&&'E-post '+s.settings.email,s.settings.web&&'Webb '+s.settings.web].filter(Boolean).join('   ');if(contact)paragraph(contact,{size:7.5,color:'#555c67',italic:true,after:13});}
  paragraph(s.title,{size:17,strong:true,color:serif?'#111111':accent,after:9});
- if(s.settings.documentName!==s.title)paragraph(s.settings.documentName,{size:10,strong:true,after:7});
- if(s.settings.recipient)paragraph('Till: '+s.settings.recipient,{size:9,after:6});
- if(s.settings.includeStudent)paragraph(`${[s.student.name,s.student.program,s.student.year].filter(Boolean).join(' · ')}`,{size:9,after:9});
- if(s.settings.includeSummary)paragraph(`${s.scope}. ${exportNumber(s.total)} hp i planen, ${exportNumber(s.done)} hp avklarade och ${exportNumber(s.total-s.done)} hp kvar.`,{size:9,after:9});
- heading('Handlingsplan – kurser');
- const columns=exportColumns(s.settings),weight=columns.reduce((n,c)=>n+c.weight,0),colWidths=columns.map(c=>contentWidth*c.weight/weight),tableSize=columns.length>8?7:8.5;
- const tableRow=(values,header=false)=>{const lines=values.map((v,i)=>wrap(v,colWidths[i]-10,tableSize,header)),rowHeight=Math.max(...lines.map(v=>v.length))*(tableSize+3)+12;if(y+rowHeight>height-49){addPage();tableHeader();}const top=y;let x=margin;values.forEach((v,i)=>{page.push({kind:'rect',x,y:top,width:colWidths[i],height:rowHeight,fill:header?'#f0f1f3':'#ffffff',stroke:'#ccd2d9'});lines[i].forEach((t,j)=>write(t,x+5,top+6+j*(tableSize+3),tableSize,header));x+=colWidths[i];});y+=rowHeight;};
- const tableHeader=()=>tableRow(columns.map(c=>c.label),true);tableHeader();
- if(!s.courses.length)tableRow(columns.map((_,i)=>i===1?'Inga kurser i vald period.':''));else for(const c of s.courses)tableRow(columns.map(col=>tableValue(c,col.key)));
- y+=11;
- if(s.settings.includeRate&&s.courses.some(c=>c.pace.endsWith('*')))paragraph('* Beräknad studietakt utifrån hela kursens hp och planeringsdatum: hp / (veckor × 1,5) × 100. Angiven studietakt visas utan asterisk.',{size:7.3,color:'#56606d',after:8});
- if(s.settings.includePeriods)paragraph('LTH:s LP är källmetadata från kurskatalogen 2026/2027 och anger inte dina planeringsdatum.',{size:7.3,color:'#56606d',after:8});
- if(s.settings.includeNotes&&s.student.note.trim()){heading('Anteckningar och nästa steg');paragraph(s.student.note,{size:10,after:10});}
- if(s.settings.includeSources){heading('Underlag');paragraph(s.source,{size:8});for(const c of s.courses){if(c.note){ensure(40);paragraph(c.code+' '+c.title,{size:9,strong:true,after:4});paragraph(c.note,{size:9,after:6});}if(c.sourceUrl)paragraph(c.sourceUrl,{size:7.5,after:7});}}
+ for (const info of s.documentInfo) paragraph(info,{size:10,after:4});
+ const table = block => {
+  const totalWeight = block.weights.reduce((n,w)=>n+w,0);
+  const widths = block.weights.map(w=>contentWidth*w/totalWeight);
+  const size = 9.2, rowStep = size+3;
+  const linesFor = (row,head) => row.map((value,i)=>wrap(value,widths[i]-10,size,head));
+  const draw = (cells,count,head) => {
+   const top = y, rowHeight = count*rowStep+10;
+   let x = margin;
+   cells.forEach((parts,i)=>{
+    page.push({kind:'rect',x,y:top,width:widths[i],height:rowHeight,fill:head?'#f0f2f5':'#ffffff',stroke:'#dce4eb'});
+    parts.forEach((text,j)=>write(text,x+5,top+4+j*rowStep,size,head));
+    x+=widths[i];
+   });
+   y+=rowHeight;
+  };
+  const header = linesFor(block.labels,true);
+  const headerLines = Math.max(...header.map(c=>c.length));
+  const firstRowLines = block.rows[0] ? Math.max(...linesFor(block.rows[0],false).map(c=>c.length)) : 1;
+  ensure((headerLines+Math.min(firstRowLines,3))*rowStep+20);
+  const drawHeader = () => draw(header,headerLines,true);
+  drawHeader();
+  for (const row of block.rows) {
+   const cells = linesFor(row,false);
+   const length = Math.max(...cells.map(c=>c.length));
+   let index = 0;
+   while (index<length) {
+    let room = Math.floor((height-49-y-10)/rowStep);
+    if (room<Math.min(length-index,3) || (index===0 && length<=8 && room<length)) {
+     addPage();
+     drawHeader();
+     room = Math.floor((height-49-y-10)/rowStep);
+    }
+    const count = Math.min(room,length-index);
+    draw(cells.map(c=>c.slice(index,index+count)),count,false);
+    index+=count;
+   }
+  }
+  y+=10;
+ };
+ for (const block of s.blocks) {
+  if (block.kind==='scenario') {
+   ensure(100);
+   y+=9;
+   paragraph('Scenario: '+block.text,{size:14,strong:true,color:accent,after:10});
+  } else if (block.kind==='heading') {
+   ensure(85);
+   heading(block.text);
+  } else if (block.kind==='table') table(block);
+  else paragraph(block.text,{size:10,after:7});
+ }
  for(let i=0;i<pages.length;i++){page=pages[i];const footerLines=wrap(s.settings.documentName+' · '+s.settings.date,contentWidth-50,7);write(footerLines[0]+(footerLines.length>1?'…':''),margin,height-29,7,false,'#697480');const right=`${i+1}/${pages.length}`;write(right,width-margin-normal.widthOfTextAtSize(right,7),height-29,7,false,'#697480');}
  return {pdf,pages,width,height,normal,bold,serifNormal,serifBold,chooseFont};
 }
@@ -60,20 +110,42 @@ export function sceneSVG(scene){return scene.pages.map((items,index)=>`<svg role
 export async function createPDF(s,lib=globalThis.PDFLib){const scene=await exportScene(s,lib),{pdf}=scene;pdf.setTitle(s.title);pdf.setAuthor(s.settings.advisor||'Studieplanering');const rgb=hex=>{const n=parseInt(hex.slice(1),16);return lib.rgb((n>>16&255)/255,(n>>8&255)/255,(n&255)/255);};const images=new Map();for(const items of scene.pages){const p=pdf.addPage([scene.width,scene.height]);for(const i of items){if(i.kind==='text')p.drawText(i.text,{x:i.x,y:scene.height-i.y-i.size,size:i.size,font:scene.chooseFont(i.text,i.strong),color:rgb(i.color)});else if(i.kind==='line')p.drawLine({start:{x:i.x1,y:scene.height-i.y1},end:{x:i.x2,y:scene.height-i.y2},color:rgb(i.color),thickness:i.weight});else if(i.kind==='rect')p.drawRectangle({x:i.x,y:scene.height-i.y-i.height,width:i.width,height:i.height,color:rgb(i.fill),borderColor:rgb(i.stroke),borderWidth:.5});else{if(!images.has(i.dataUrl))images.set(i.dataUrl,await(i.dataUrl.startsWith('data:image/jpeg')?pdf.embedJpg(i.dataUrl):pdf.embedPng(i.dataUrl)));p.drawImage(images.get(i.dataUrl),{x:i.x,y:scene.height-i.y-i.height,width:i.width,height:i.height});}}}return new Blob([await pdf.save()],{type:'application/pdf'});}
 export async function createWord(s,lib=globalThis.docx){
  if(!lib)throw Error('Word-stödet kunde inte laddas.');
- const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,ImageRun,WidthType,HeadingLevel,AlignmentType,BorderStyle}=lib,p=s.settings,serif=p.template==='lu',font=serif?'Times New Roman':'Arial',accent=serif?'201B17':p.accent.slice(1),logo=exportLogo(p),landscape=p.orientation==='landscape',totalWidth=landscape?14200:10050;
+ s = exportContent(s);
+ const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,ImageRun,WidthType,HeadingLevel,AlignmentType,BorderStyle,Footer,Header,PageNumber}=lib,p=s.settings,serif=p.template==='lu',font=serif?'Times New Roman':'Arial',accent=serif?'201B17':p.accent.slice(1),logo=exportLogo(p),landscape=p.orientation==='landscape',totalWidth=landscape?14200:10050;
  const para=(text,opts={})=>new Paragraph({spacing:{after:100,line:250},children:[new TextRun({text:String(text),font,size:20,color:'111111',...opts.run})],...opts});
- const border={style:BorderStyle.SINGLE,size:4,color:'CCD2D9'},noBorder={style:BorderStyle.NONE,size:0,color:'FFFFFF'},columns=exportColumns(p),totalWeight=columns.reduce((n,c)=>n+c.weight,0),widths=columns.map(c=>Math.floor(totalWidth*c.weight/totalWeight));
- const makeCell=(text,i,head=false)=>new TableCell({width:{size:widths[i],type:WidthType.DXA},margins:{top:100,bottom:100,left:90,right:90},verticalAlign:'center',borders:{top:border,bottom:border,left:border,right:border},shading:{fill:head?'F0F1F3':'FFFFFF'},children:[para(text,{spacing:{after:0,line:230},run:{size:columns.length>8?16:18,bold:head}})]});
+ const border={style:BorderStyle.SINGLE,size:4,color:'DCE4EB'};
+ const noBorder={style:BorderStyle.NONE,size:0,color:'FFFFFF'};
  const children=[];const logoChildren=[];
  if(logo){const bytes=Uint8Array.from(atob(logo.dataUrl.split(',')[1]),c=>c.charCodeAt(0)),scale=Math.min((serif?60:100)/logo.width,(serif?76:60)/logo.height);logoChildren.push(new Paragraph({children:[new ImageRun({data:bytes,type:logo.dataUrl.startsWith('data:image/jpeg')?'jpg':'png',transformation:{width:logo.width*scale,height:logo.height*scale}})]}));}else logoChildren.push(para(''));
  children.push(new Table({width:{size:totalWidth,type:WidthType.DXA},columnWidths:[Math.floor(totalWidth*.30),Math.floor(totalWidth*.70)],borders:{top:noBorder,bottom:noBorder,left:noBorder,right:noBorder,insideHorizontal:noBorder,insideVertical:noBorder},rows:[new TableRow({children:[new TableCell({children:logoChildren,borders:{top:noBorder,bottom:noBorder,left:noBorder,right:noBorder}}),new TableCell({borders:{top:noBorder,bottom:noBorder,left:noBorder,right:noBorder},children:[[p.role,p.advisor].filter(Boolean).join(' · '),p.institution,p.unit,p.date].filter(Boolean).map(v=>para(v,{alignment:AlignmentType.RIGHT,spacing:{after:40},run:{size:18}}))})]})]}));
  children.push(new Paragraph({spacing:{before:80,after:160},border:{bottom:{style:BorderStyle.SINGLE,size:8,color:accent}}}));
  if(p.includeContact){const contact=[p.postal&&'Postadress '+p.postal,p.visit&&'Besöksadress '+p.visit,p.phone&&'Telefon '+p.phone,p.email&&'E-post '+p.email,p.web&&'Webb '+p.web].filter(Boolean).join('   ');if(contact)children.push(para(contact,{run:{size:15,italics:true,color:'555C67'},spacing:{after:180}}));}
- children.push(para(s.title,{heading:HeadingLevel.TITLE,run:{size:34,bold:true,color:accent},spacing:{after:160},keepNext:true}));if(p.documentName!==s.title)children.push(para(p.documentName,{run:{bold:true}}));if(p.recipient)children.push(para('Till: '+p.recipient));if(p.includeStudent)children.push(para(`${[s.student.name,s.student.program,s.student.year].filter(Boolean).join(' · ')}`,{run:{size:18}}));if(p.includeSummary)children.push(para(`${s.scope}. ${exportNumber(s.total)} hp i planen, ${exportNumber(s.done)} hp avklarade, ${exportNumber(s.total-s.done)} hp kvar.`,{run:{size:18}}));
- const heading=v=>para(v,{heading:HeadingLevel.HEADING_1,run:{size:22,bold:true,color:accent},spacing:{before:160,after:100},keepNext:true});children.push(heading('Handlingsplan – kurser'));
- const rows=[new TableRow({tableHeader:true,children:columns.map((c,i)=>makeCell(c.label,i,true))}),...s.courses.map(c=>new TableRow({cantSplit:true,children:columns.map((col,i)=>makeCell(tableValue(c,col.key),i))}))];if(!s.courses.length)rows.push(new TableRow({children:columns.map((_,i)=>makeCell(i===1?'Inga kurser i vald period.':'',i))}));children.push(new Table({width:{size:totalWidth,type:WidthType.DXA},columnWidths:widths,rows}));
- if(p.includeRate&&s.courses.some(c=>c.pace.endsWith('*')))children.push(para('* Beräknad studietakt utifrån kursens hp och planeringsdatum. Angiven studietakt visas utan asterisk.',{run:{size:15,color:'56606D'},spacing:{before:120,after:100}}));if(p.includePeriods)children.push(para('LTH:s LP är metadata från katalogen 2026/2027, inte dina planeringsdatum.',{run:{size:15}}));
- if(p.includeNotes&&s.student.note.trim()){children.push(heading('Anteckningar och nästa steg'),...s.student.note.split('\n').map(t=>para(t||' ')));}if(p.includeSources){children.push(heading('Underlag'),para(s.source,{run:{size:16}}));for(const c of s.courses){if(c.note)children.push(para(c.code+' '+c.title,{keepNext:true,run:{bold:true,size:18}}),...c.note.split('\n').map(t=>para(t||' ',{run:{size:18}})));if(c.sourceUrl)children.push(para(c.sourceUrl,{run:{size:16}}));}}
- const doc=new Document({creator:p.advisor||'Studieplanering',title:s.title,styles:{default:{document:{run:{font,size:20,color:'111111'}}},paragraphStyles:[{id:'Title',name:'Title',basedOn:'Normal',next:'Normal',run:{font,size:34,color:accent,bold:true},paragraph:{spacing:{after:160}}},{id:'Heading1',name:'Heading 1',basedOn:'Normal',next:'Normal',run:{font,size:22,color:accent,bold:true},paragraph:{spacing:{before:160,after:100}}}]},sections:[{properties:{page:{size:{width:landscape?16838:11906,height:landscape?11906:16838},margin:{top:920,bottom:920,left:928,right:928}}},children}]});return Packer.toBlob(doc);
+ children.push(para(s.title,{heading:HeadingLevel.TITLE,run:{size:34,bold:true,color:'111111'},spacing:{after:160},keepNext:true}));
+ for (const info of s.documentInfo) children.push(para(info,{run:{size:20}}));
+ const heading = (value,scenario=false)=>para(value,{heading:HeadingLevel.HEADING_1,run:{size:scenario?28:22,bold:true,color:accent},spacing:{before:180,after:100},keepNext:true});
+ for (const block of s.blocks) {
+  if (block.kind==='scenario') children.push(heading('Scenario: '+block.text,true));
+  else if (block.kind==='heading') children.push(heading(block.text));
+  else if (block.kind==='paragraph') children.push(...block.text.split('\n').map(line=>para(line||' ')));
+  else {
+   const weight = block.weights.reduce((n,w)=>n+w,0);
+   const widths = block.weights.map(w=>Math.floor(totalWidth*w/weight));
+   const makeCell = (text,i,head)=>new TableCell({width:{size:widths[i],type:WidthType.DXA},
+    margins:{top:85,bottom:85,left:90,right:90},borders:{top:border,bottom:border,left:border,right:border},
+    shading:{fill:head?'F0F2F5':'FFFFFF'},
+    children:String(text).split('\n').map(value=>para(value||' ',{spacing:{after:0,line:220},run:{size:18,bold:head}}))});
+   const rows = [new TableRow({tableHeader:true,children:block.labels.map((value,i)=>makeCell(value,i,true))}),
+    ...block.rows.map(row=>new TableRow({children:row.map((value,i)=>makeCell(value,i,false))}))];
+   children.push(new Table({width:{size:totalWidth,type:WidthType.DXA},columnWidths:widths,rows}));
+  }
+ }
+ const createFooter = () => new Footer({children:[new Paragraph({alignment:AlignmentType.RIGHT,children:[
+  new TextRun({children:['Sida ',PageNumber.CURRENT,' av ',PageNumber.TOTAL_PAGES],font,size:16,color:'52647B'})
+ ]})]});
+ const continuation = new Header({children:[para(s.title+' · fortsättning',{
+  alignment:AlignmentType.LEFT,spacing:{after:30},run:{size:16,color:accent,bold:true}
+ })]});
+ const blankHeader = new Header({children:[new Paragraph('')]});
+ const doc=new Document({creator:p.advisor||'Studieplanering',title:s.title,styles:{default:{document:{run:{font,size:20,color:'111111'}}},paragraphStyles:[{id:'Title',name:'Title',basedOn:'Normal',next:'Normal',run:{font,size:34,color:accent,bold:true},paragraph:{spacing:{after:160}}},{id:'Heading1',name:'Heading 1',basedOn:'Normal',next:'Normal',run:{font,size:22,color:accent,bold:true},paragraph:{spacing:{before:160,after:100}}}]},sections:[{headers:{first:blankHeader,default:continuation},footers:{first:createFooter(),default:createFooter()},properties:{titlePage:true,page:{size:{width:landscape?16838:11906,height:landscape?11906:16838},margin:{top:920,bottom:920,left:928,right:928,header:405}}},children}]});return Packer.toBlob(doc);
 }
 export function downloadFile(blob,filename){const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),3000);}

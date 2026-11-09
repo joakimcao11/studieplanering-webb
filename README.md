@@ -1,31 +1,33 @@
 # Studieplanering LTH
 
-En lokal arbetsyta för studie- och karriärvägledare och annan LTH-personal. Skapa namnfria ärenden, jämför alternativ och använd LTH:s daterade kursutbud som planeringsunderlag.
+En lokal arbetsyta för studie- och karriärvägledare och annan LTH-personal. Planera per läsår och läsperiod, följ upp kvarstående examinationer och jämför alternativa upplägg inom samma ärende.
 
-[Öppna webbappen](https://joakimcao11.github.io/studieplanering-webb/)
+[Öppna webbappen](https://joakimcao11.github.io/studieplanering-webb/) · [Användarguide](ANVANDNING.md) · [Katalog och källkontroll](tools/CATALOG.md)
 
-Ärendena finns i den aktuella webbläsarprofilen. De kan flyttas med JSON-export och import. Studentens namn kan anges tillfälligt i exportdialogen för Word eller PDF. Kombinationer av uppgifter och fritext kan identifiera en person. Håll därför anteckningar korta och avidentifierade.
+Ärendena finns i den aktuella webbläsarprofilen. Använd JSON-export och import för att flytta dem. Studentens namn kan anges tillfälligt i exportdialogen för Word eller PDF. Kombinationer av uppgifter och fritext kan identifiera en person. Håll anteckningarna korta och avidentifierade.
 
-[Kort användarguide](ANVANDNING.md) · [Katalog och källkontroll](tools/CATALOG.md)
+## Utveckling och publicering
 
-## Utveckling
-
-`dist/` är arbetskällan och `docs/` är GitHub Pages-kopian. Node 24 används för skripten.
+`dist/` är arbetskällan. `docs/` är GitHub Pages-kopian. Node 24 används för skripten.
 
 ```text
 npm start
 npm run check
 npm test
-npm run pages
 npm run build
+npm run pages
 ```
 
-`npm run build` skapar en fristående HTML-fil. `npm run pages` kopierar de statiska filerna till `docs/`. GitHub Pages publicerar från `main:/docs`.
+`npm run build` skapar en fristående HTML-fil. GitHub Pages publicerar `docs/` från `main`. Uppdatera kurskatalogen enligt [källdokumentationen](tools/CATALOG.md).
 
-## Överlämning från etapp 1
+## Datamodell och beräkning
 
-- `dist/cases.js` läser och validerar schema 3. Nyckeln är `studieplan-v3`. En arbetsyta innehåller `cases`, `courses`, `activeCaseId` och mallpreferenser. JSON-backupen innehåller bara version, ärenden och kurser inom vald omfattning.
-- Ett ärende har ett lokalt slump-ID, tidsstämplar, programkod, antagningsår, årskurs, planeringsläsår, mål, avidentifierad anteckning och en markering för alternativ. En kurs tillhör ett ärende via `caseId`. En kurs från katalogen har kurskod, källäsår, programkoppling, `periods` och `timePlans` skilda från egna datum.
-- Äldre `studieplan-v1` med schema 1/2 lämnas kvar tills användaren väljer. Migrationen väljer planer, skapar nya ID:n och utesluter namn och äldre anteckningar. Egna kurser får en neutral titel för eftergranskning.
-- `case-view.js`, `catalog-view.js`, `program-catalog.js`, `lth-calendar.js` och `case-workspace.css` innehåller ärendevy, programkatalog, kalender och layout. Det befintliga planeringsflödet använder fortfarande egna datum och den gamla dokumentmallen via en tillfällig adapter.
-- Nästa etapp kan bygga vidare på `officialCalendar` och kursernas källplacering för planering per LP, omtentamen, kompletteringar och uppdaterade dokument.
+- `dist/cases.js` validerar arbetsytan och JSON-backuper. Schema 4 ligger kvar i lagringsnyckeln `studieplan-v3` så att rensning och uppgradering använder samma sparplats. Vid läsning av schema 3 skapas ett scenario per ärende. Datumkurser får egen placering, kurs- och källdata behålls och den äldre ärendeanteckningen blir en planeringsöverenskommelse. Äldre alternativ som sparades som separata ärenden behålls som separata ärenden eftersom deras ursprung inte kan fastställas säkert.
+- Ett ärende har scenarier med egna läsår, omtentamina, kompletteringar, periodanteckningar, agenda, överenskommelser och uppföljning. Kursraderna har `caseId` och `scenarioId`. Referenser valideras vid sparning och import. Kopiering och import ger nya ID:n och flyttar om referenser inom samma scenario.
+- LoT:s `catalogYear`, programkoppling, `periods` och `timePlans` hålls skilda från `plannedYear`, `plannedPeriods`, egna datum och manuell poängfördelning. `dist/lth-calendar.js` beskriver kalendern 2026/27 och undantagen. Planer för andra läsår kan skapas utan att appen anger officiella datum.
+- `dist/planning.js` har samma sammanställning för vyer, jämförelse och export. En kurs räknas en gång i läsårstotalen. En enperiodskurs tilldelas sin planerade period. För flerperiodskurser används bara en uttrycklig manuell fördelning när perioderna delas upp. Terminstotalen tar med fulla kurser inom terminen och kända andelar för kurser över terminsgränsen. Delpoäng visas där de kan hänföras till rätt omfattning. Examinationer lägger aldrig till HP. Studietakt kan anges per kurs och per period. Om endast kursens studie­veckor anges uppskattas takten med 1,5 hp per vecka.
+- `dist/planning-export.js` bygger dokumentets innehåll från vald omfattning. PDF, dess förhandsgranskning och Word delar samma avsnitt, tabeller och summeringar. Studentnamn lever i exportdialogens minne och inkluderas bara i det dokument som skapas. JSON innehåller ärenden och kurser. Mallval sparas separat från ärendedata och dokumentets fritextfält förblir tillfälliga.
+
+## Gränser
+
+Katalogen visar kursutbudet för 2026/27. Planen behöver följas upp mot utbildningsplan för aktuell antagningskull, Ladok, studiemedel och TimeEdit. Appen utför ingen automatisk kontroll av de uppgifterna. Webbläsarens lokala lagring kan försvinna vid rensning och synkas inte.

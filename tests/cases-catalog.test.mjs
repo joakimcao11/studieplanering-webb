@@ -23,7 +23,7 @@ test('standarddatum stannar i vald månad även vid skottår och årsskifte', ()
 
 test('lokal lagring och ärendebackup väljer schemafält och behåller kull separat', () => {
  const a = { ...record(), name:'ALDRIG-SKICKA' }, b = record();
- const workspace = { ...emptyWorkspace(), cases:[a,b], courses:[{...course(a.id), studentName:'ALDRIG-SKICKA'},course(b.id)],
+ const workspace = { ...emptyWorkspace(), version:3, cases:[a,b], courses:[{...course(a.id), studentName:'ALDRIG-SKICKA'},course(b.id)],
   activeCaseId:a.id, exportSettings:{ template:'lu', recipient:'ALDRIG-SKICKA', documentName:'ALDRIG-SKICKA' } };
  const values = new Map();
  const storage = { getItem:key=>values.get(key) ?? null, setItem:(key,value)=>values.set(key,value) };
@@ -51,7 +51,7 @@ test('korrupt lagring, skrivfel, felaktigt schema och dubbla kurser avvisas', ()
  assert.equal(saveWorkspace({setItem:()=>{throw Error('Quota');}},emptyWorkspace(),catalog),false);
  assert.throws(()=>validateWorkspace({version:2,students:[],courses:[]},catalog));
  const a = record();
- const plan = { ...emptyWorkspace(), cases:[a], courses:[course(a.id),course(a.id)] };
+ const plan = { ...emptyWorkspace(), version:3, cases:[a], courses:[course(a.id),course(a.id)] };
  assert.throws(()=>validateWorkspace(plan,catalog),/Dubblett/);
  assert.throws(()=>validateWorkspace({...plan,courses:[{...course(a.id),caseId:newId()}]},catalog),/utan ärende/);
 });

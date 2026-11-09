@@ -1,22 +1,169 @@
-import {exportSnapshot,exportScene,sceneSVG,createPDF,createWord,downloadFile} from './exports.js';
-import {defaultExportSettings,normalizedExportSettings,templateDefaults} from './export-settings.js';
-const exportEscape=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-export function openExportPanel(context){
- const dialog=document.querySelector('#editor'),controller=new AbortController(),signal=controller.signal;
- let settings=normalizedExportSettings({...templateDefaults[context.saved?.template],...context.saved}),revision=0,timer,temporaryName='';
- const field=(name,label,type='text',wide=false)=>`<label class="${wide?'wide':''}">${label}<input name="${name}" type="${type}" value="${exportEscape(settings[name])}" ${type==='text'?'maxlength="300"':''}></label>`;
- const checkbox=(name,label)=>`<label class="export-check"><input type="checkbox" name="${name}" ${settings[name]?'checked':''}>${label}</label>`;
- function fields(){return `<fieldset class="template-choice"><legend>Mall</legend>${[['lth','LTH-mall'],['lu','LU-mall'],['custom','Anpassad mall']].map(([id,label])=>`<label><input type="radio" name="template" value="${id}" ${settings.template===id?'checked':''}>${label}</label>`).join('')}</fieldset><p class="note-footer">Befintlig dokumentmall. Enbart mall, format och innehållsval kan sparas.</p><label>Studentens namn (tillfälligt, valfritt)<input id="temporary-name" autocomplete="off" spellcheck="false" maxlength="120" value="${exportEscape(temporaryName)}"></label><p class="note-footer">Används i dokumentet. Rensas efter nedladdning eller när dialogen stängs.</p><div class="form-grid">${field('documentName','Dokumentnamn')}${field('date','Datum','date')}${field('documentTitle','Dokumenttitel (stor rubrik)','text',true)}<div class="wide custom-logo-options" ${settings.template==='custom'?'':'hidden'}><label>Egen logotyp (PNG/JPG, högst 1 MB)<input id="export-logo" type="file" accept="image/png,image/jpeg"></label><button type="button" data-export-remove-logo>Ta bort egen logotyp</button></div>${field('institution','Institution / organisation','text',true)}${field('unit','Enhet / avdelning')}${field('role','Handläggare / titel')}${field('advisor','Namn på handläggare','text',true)}${field('postal','Postadress')}${field('visit','Besöksadress')}${field('phone','Telefon')}${field('email','E-post')}${field('web','Webbadress','text',true)}${field('recipient','Adressat (valfritt)','text',true)}<label>Omfattning<select name="scope"><option value="all" ${settings.scope==='all'?'selected':''}>Hela ärendets plan</option><option value="period" ${settings.scope==='period'?'selected':''}>${exportEscape(context.scope)}</option></select></label><label>Pappersformat<select name="orientation"><option value="portrait" ${settings.orientation==='portrait'?'selected':''}>A4 stående</option><option value="landscape" ${settings.orientation==='landscape'?'selected':''}>A4 liggande</option></select></label>${settings.template==='custom'?field('accent','Rubrikfärg','color'):''}</div><fieldset class="export-checkboxes"><legend>Innehåll</legend>${checkbox('includeStudent','Utbildning och eventuellt studentnamn')}${checkbox('includeContact','Kontaktuppgifter')}${checkbox('includeSummary','Poängsammanfattning')}${checkbox('includeNotes','Anteckningar och nästa steg')}${checkbox('includeSources','Kursanteckningar och källor')}</fieldset><fieldset class="export-checkboxes"><legend>Extra tabellkolumner</legend><p>Kurskod, namn och HP visas alltid.</p>${checkbox('includeRate','Studietakt')}${checkbox('includeAcademic','Läsår och termin')}${checkbox('includeMonths','Månader')}${checkbox('includePeriods','LTH:s läsperioder (källmetadata)')}${checkbox('includeDates','Planeringsdatum')}${checkbox('includeStatus','Kursstatus')}</fieldset><div class="export-utilities"><button type="button" data-export-save>Spara mallval</button><button type="button" data-export-reset>Återställ mallen</button><button type="button" data-export-backup>Exportera ärendet som JSON</button></div>`;}
+import { createPDF, createWord, downloadFile, exportScene, sceneSVG } from './exports.js';
+import { normalizedExportSettings, templateDefaults } from './export-settings.js';
+import { htmlEscape } from './catalog-view.js';
+
+const exportEsc = htmlEscape;
+
+export function openExportPanel(context) {
+ const dialog = document.querySelector('#editor');
+ const controller = new AbortController();
+ const {signal} = controller;
+ let settings = normalizedExportSettings({...context.saved,includeStudent:true});
+ let temporaryName = '';
+ let timer, revision = 0, busy = false, logoRevision = 0;
+ const field = (name,label,type='text') => `<label>${label}<input name="${name}" type="${type}" value="${exportEsc(settings[name])}" maxlength="180"></label>`;
+ const checkbox = (name,label) => `<label class="inline-check"><input type="checkbox" name="${name}" ${settings[name]?'checked':''}> ${label}</label>`;
+ const select = (name,label,options,current) => `<label>${label}<select name="${name}">${options.map(([id,text])=>`<option value="${exportEsc(id)}" ${id===current?'selected':''}>${exportEsc(text)}</option>`).join('')}</select></label>`;
+
  dialog.classList.add('export-dialog');
- dialog.innerHTML=`<div class="dialog-head"><h2 id="editor-title">▤ Förhandsgranska och exportera</h2><button type="button" data-export-close aria-label="Stäng export">✕</button></div><div class="export-layout"><section class="export-settings" aria-label="Exportinställningar">${fields()}</section><section class="export-preview" aria-label="Dokumentförhandsgranskning"><div class="export-preview-caption"><b>Förhandsgranskning</b><span id="export-page-count" role="status"></span></div><div id="export-preview-pages" aria-busy="true"><p class="empty">Skapar förhandsgranskningen…</p></div><p class="preview-help">PDF och förhandsgranskning använder samma sidlayout. Radbrytningar kan skilja något i Word.</p></section></div><div class="export-footer"><p id="export-status" role="status" aria-live="polite"></p><button type="button" data-export-close>Avbryt</button><button type="button" data-export-download="pdf">↓ Ladda ner PDF</button><button type="button" class="primary" data-export-download="word">↓ Ladda ner Word</button></div>`;
- if(!document.querySelector('#export-fonts')&&globalThis.STUDIE_FONTS){const style=document.createElement('style');style.id='export-fonts';style.textContent=`@font-face{font-family:ExportSans;src:url(data:font/ttf;base64,${globalThis.STUDIE_FONTS.regular})} @font-face{font-family:ExportSans;font-weight:700;src:url(data:font/ttf;base64,${globalThis.STUDIE_FONTS.bold})}`;document.head.append(style);}
- function read(){temporaryName=dialog.querySelector('#temporary-name').value.trim();const next={...settings};dialog.querySelectorAll('.export-settings [name]').forEach(el=>{if(el.type==='radio'){if(el.checked)next[el.name]=el.value;}else next[el.name]=el.type==='checkbox'?el.checked:el.value;});settings=normalizedExportSettings(next);return settings;}
- const snapshot=()=>exportSnapshot({...context.student,name:temporaryName},settings.scope==='all'?context.courses:context.periodCourses,settings.scope==='all'?'Hela studieplanen':context.scope,context.catalog,settings);
- async function preview(){const mine=++revision;read();const host=dialog.querySelector('#export-preview-pages');host.setAttribute('aria-busy','true');try{const scene=await exportScene(snapshot());if(mine!==revision||signal.aborted)return;host.innerHTML=sceneSVG(scene);dialog.querySelector('#export-page-count').textContent=scene.pages.length+(scene.pages.length===1?' sida':' sidor');}catch(error){if(mine===revision)host.innerHTML='<p class="error">Kunde inte skapa förhandsgranskningen. '+exportEscape(error.message)+'</p>';}finally{if(mine===revision)host.setAttribute('aria-busy','false');}}
- function schedule(){clearTimeout(timer);timer=setTimeout(preview,220);}
- dialog.addEventListener('input',e=>{if(!e.target.closest('.export-settings')||e.target.id==='export-logo')return;if(e.target.name==='template'){read();settings={...settings,...templateDefaults[settings.template]};dialog.querySelector('.export-settings').innerHTML=fields();}schedule();},{signal});
- dialog.addEventListener('change',async e=>{if(e.target.id!=='export-logo')return;const file=e.target.files?.[0];if(!file)return;const status=dialog.querySelector('#export-status');if(!['image/png','image/jpeg'].includes(file.type)||file.size>1024*1024){status.textContent='Välj en PNG- eller JPG-bild på högst 1 MB.';return;}try{const image=await createImageBitmap(file),reader=new FileReader();reader.onload=()=>{settings.customLogo=String(reader.result);settings.logoWidth=image.width;settings.logoHeight=image.height;image.close();if(!signal.aborted)schedule();};reader.readAsDataURL(file);}catch{status.textContent='Bilden kunde inte läsas.';}},{signal});
- dialog.addEventListener('click',async e=>{const button=e.target.closest('button');if(!button)return;if(button.hasAttribute('data-export-close')){dialog.close();return;}const status=dialog.querySelector('#export-status');if(button.hasAttribute('data-export-save')){read();status.textContent=context.onSave(settings)?'Mallvalen är sparade på den här enheten.':'Mallvalen kunde inte sparas.';}if(button.hasAttribute('data-export-reset')){const template=settings.template;settings={...defaultExportSettings(),template,...templateDefaults[template]};dialog.querySelector('.export-settings').innerHTML=fields();schedule();}if(button.hasAttribute('data-export-backup'))context.onBackup();if(button.hasAttribute('data-export-remove-logo')){settings.customLogo='';schedule();}if(button.dataset.exportDownload){const type=button.dataset.exportDownload;dialog.querySelectorAll('[data-export-download]').forEach(b=>b.disabled=true);status.textContent='Skapar dokumentet…';try{read();const result=snapshot(),blob=await(type==='pdf'?createPDF(result):createWord(result));downloadFile(blob,`Studieplanering_${settings.date}.${type==='pdf'?'pdf':'docx'}`);if(signal.aborted)return;temporaryName='';dialog.querySelector('#temporary-name').value='';dialog.querySelector('[name=recipient]').value='';schedule();status.textContent='Dokumentet är klart och finns i webbläsarens hämtningar.';}catch(error){status.textContent='Exporten misslyckades: '+error.message;}finally{dialog.querySelectorAll('[data-export-download]').forEach(b=>b.disabled=false);}}},{signal});
- dialog.addEventListener('close',()=>{clearTimeout(timer);temporaryName='';revision++;controller.abort();dialog.classList.remove('export-dialog');},{once:true});
- dialog.showModal();preview();
+ dialog.innerHTML = `<div class="dialog-head"><h2 id="editor-title">Förhandsgranska och exportera</h2><button data-export-close aria-label="Stäng export">✕</button></div>
+ <div class="export-layout"><section class="export-settings" aria-label="Exportinställningar">
+ <div class="form-grid">
+ ${select('documentMode','Dokument',[['overview','Studieplan – översikt'],['detail','Detaljerat planeringsunderlag']],settings.documentMode)}
+ ${field('date','Dokumentdatum','date')}
+ ${select('scope','Omfattning',[['all','Hela planen'],['year',context.yearLabel],...(context.termLabel?[['term',context.termLabel]]:[])],'all')}
+ ${select('additionalScenario','Exportera scenario',[['','Enbart '+context.scenario.name],...context.others.map(s=>[s.id,context.scenario.name+' och '+s.name])],'')}
+ </div>
+ <label>Studentens namn (valfritt, används bara i detta dokument)<input id="temporary-name" maxlength="120" autocomplete="off" spellcheck="false"></label>
+ <p class="note-footer">Namnet rensas efter nedladdning eller när du stänger dialogen.</p>
+ <div class="form-grid">${field('advisor','Vägledarens namn')}${field('role','Titel')}${field('institution','Organisation')}</div>
+ <details class="export-more"><summary>Fler inställningar</summary>
+ <div class="form-grid">${select('template','Mall',[['neutral','Neutral'],['lth','LTH – textmall'],['lu','LU – textmall'],['custom','Anpassad']],settings.template)}
+ ${select('orientation','Pappersformat',[['portrait','A4 stående'],['landscape','A4 liggande']],settings.orientation)}
+ ${field('documentTitle','Anpassad dokumentrubrik')}${field('accent','Accentfärg','color')}
+ ${field('unit','Enhet / avdelning')}${field('postal','Postadress')}${field('visit','Besöksadress')}${field('phone','Telefon')}${field('email','E-post')}${field('web','Webbadress')}
+ </div>
+ <div id="custom-export-logo" ${settings.template==='custom'?'':'hidden'}><label>Egen godkänd logotyp (PNG/JPG, högst 1 MB)<input id="export-logo" type="file" accept="image/png,image/jpeg"></label><button data-export-remove-logo>Ta bort logotyp</button></div>
+ <fieldset><legend>Avsnitt</legend>${checkbox('includeNotes','Överenskommelser, anteckningar och nästa steg')}${checkbox('includeContact','Kontaktuppgifter i dokumentet')}</fieldset>
+ <fieldset><legend>Detaljerat dokument</legend>${checkbox('includePeriods','Officiell kursplacering')}${checkbox('includeRate','Studietakt')}${checkbox('includeDates','Egna planeringsdatum')}${checkbox('includeMonths','Planeringsmånader')}${checkbox('includeSources','Kursplanslänkar och fotnoter')}</fieldset>
+ <p class="note-footer">Välj liggande A4 om flera uppgifter ska få plats i samma tabell.</p>
+ <button data-export-save>Spara mallval</button>
+ </details>
+ <div class="export-utilities"><button data-export-refresh>Förhandsgranska</button><button data-export-backup>Exportera ärendet som JSON</button></div>
+ </section><section class="export-preview" aria-label="Dokumentförhandsgranskning"><div class="export-preview-caption"><b>Förhandsgranskning</b><span id="export-page-count" role="status"></span></div>
+ <div id="export-preview-pages" aria-busy="true"><p>Skapar förhandsgranskningen…</p></div><p class="preview-help">Förhandsgranskningen och PDF har samma sidlayout. Word kan radbryta annorlunda.</p></section></div>
+ <div class="export-footer"><p id="export-status" role="status"></p><button data-export-close>Stäng</button><button data-export-download="pdf">↓ Ladda ner PDF</button><button class="primary" data-export-download="word">↓ Ladda ner Word</button></div>`;
+
+ if (!document.querySelector('#export-fonts') && globalThis.STUDIE_FONTS) {
+  const style = document.createElement('style');
+  style.id = 'export-fonts';
+  style.textContent = `@font-face{font-family:ExportSans;src:url(data:font/ttf;base64,${globalThis.STUDIE_FONTS.regular})} @font-face{font-family:ExportSans;font-weight:700;src:url(data:font/ttf;base64,${globalThis.STUDIE_FONTS.bold})}`;
+  document.head.append(style);
+ }
+ const settingsHost = dialog.querySelector('.export-settings');
+ const previewHost = dialog.querySelector('#export-preview-pages');
+ const status = dialog.querySelector('#export-status');
+
+ function read() {
+  const next = {...settings};
+  for (const field of settingsHost.querySelectorAll('[name]')) next[field.name] = field.type==='checkbox'?field.checked:field.value;
+  temporaryName = settingsHost.querySelector('#temporary-name').value.trim();
+  const {additionalScenario,...prefs} = next;
+  settings = normalizedExportSettings(prefs);
+  return additionalScenario;
+ }
+ function snapshot() {
+  const extra = read();
+  return context.snapshot(settings,temporaryName,extra);
+ }
+ async function preview() {
+  const token = ++revision;
+  previewHost.setAttribute('aria-busy','true');
+  try {
+   const scene = await exportScene(snapshot());
+   if (signal.aborted || token!==revision) return;
+   previewHost.innerHTML = sceneSVG(scene);
+   dialog.querySelector('#export-page-count').textContent = scene.pages.length+(scene.pages.length===1?' sida':' sidor');
+  } catch (error) {
+   if (!signal.aborted && token===revision) previewHost.textContent = 'Kunde inte skapa förhandsgranskningen. '+error.message;
+  } finally {
+   if (!signal.aborted && token===revision) previewHost.setAttribute('aria-busy','false');
+  }
+ }
+ function schedule() {
+  revision++;
+  clearTimeout(timer);
+  timer = setTimeout(preview,200);
+ }
+ settingsHost.addEventListener('input',event=>{
+  const field = event.target;
+  if (field.id==='export-logo') return;
+  if (field.name==='template') {
+   const defaults = templateDefaults[field.value];
+   settingsHost.querySelector('[name=accent]').value = defaults.accent;
+   const institution = settingsHost.querySelector('[name=institution]');
+   if (!institution.value || Object.values(templateDefaults).some(t=>t.institution===institution.value)) institution.value = defaults.institution;
+   dialog.querySelector('#custom-export-logo').hidden = field.value!=='custom';
+  }
+  schedule();
+ },{signal});
+ settingsHost.addEventListener('change',async event=>{
+  if (event.target.id!=='export-logo') return;
+  const file = event.target.files[0];
+  if (!file) return;
+  const token = ++logoRevision;
+  if (!['image/png','image/jpeg'].includes(file.type) || file.size>1024*1024) {
+   status.textContent = 'Välj en PNG- eller JPG-bild på högst 1 MB.';
+   return;
+  }
+  try {
+   const image = await createImageBitmap(file);
+   const reader = new FileReader();
+   reader.onload = () => {
+    if (!signal.aborted && token===logoRevision) {
+     settings.customLogo = String(reader.result);
+     settings.logoWidth = image.width;
+     settings.logoHeight = image.height;
+     schedule();
+    }
+    image.close();
+   };
+   reader.onerror = () => image.close();
+   reader.readAsDataURL(file);
+  } catch { status.textContent = 'Bilden kunde inte läsas.'; }
+ },{signal});
+
+ dialog.addEventListener('click',async event=>{
+  const b = event.target.closest('button')?.dataset;
+  if (!b) return;
+  if ('exportClose' in b) { dialog.close(); return; }
+  if ('exportBackup' in b) context.onBackup();
+  if ('exportSave' in b) {
+   read();
+   status.textContent = context.onSave(settings)?'Mallval sparade på den här enheten.':'Mallvalen kunde inte sparas.';
+  }
+  if ('exportRemoveLogo' in b) { logoRevision++; settings.customLogo=''; dialog.querySelector('#export-logo').value=''; schedule(); }
+  if ('exportRefresh' in b) { clearTimeout(timer); preview(); }
+  if (!b.exportDownload || busy) return;
+  busy = true;
+  const controls = dialog.querySelectorAll('[data-export-download]');
+  controls.forEach(button=>button.disabled=true);
+  status.textContent = 'Skapar dokumentet…';
+  try {
+   const data = snapshot();
+   const pdf = b.exportDownload==='pdf';
+   const result = await (pdf ? createPDF(data) : createWord(data));
+   if (signal.aborted) return;
+   downloadFile(result,'Studieplanering'+(context.programme?'_'+context.programme:'')+'_'+settings.date+'.'+(pdf?'pdf':'docx'));
+   temporaryName = '';
+   settingsHost.querySelector('#temporary-name').value = '';
+   previewHost.replaceChildren();
+   schedule();
+   status.textContent = 'Dokumentet är klart och finns i webbläsarens hämtningar.';
+  } catch (error) { status.textContent = 'Exporten misslyckades. '+error.message; }
+  finally {
+   busy = false;
+   controls.forEach(button=>button.disabled=false);
+  }
+ },{signal});
+ dialog.addEventListener('close',()=>{
+  clearTimeout(timer);
+  controller.abort();
+  temporaryName = '';
+  settingsHost.querySelector('#temporary-name').value = '';
+  previewHost.replaceChildren();
+  dialog.classList.remove('export-dialog');
+ },{once:true});
+ dialog.showModal();
+ preview();
 }

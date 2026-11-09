@@ -1,15 +1,18 @@
 # Användarguide för LTH-personal
 
-1. Öppna **Mina studieplaneringar** och välj **Ny studieplanering**. Ange program och planeringsläsår. Ange antagningsår och aktuell årskurs om de är kända.
-2. Öppna **LTH:s kurskatalog**, välj program och använd **Gå till…** eller filtren. Öppna en kurs för att se innehåll, förkunskaper, fotnoter och officiella länkar. Välj **Lägg till i studieplaneringen** och ange egna datum.
-3. Öppna **Studieplanering**. Dra kursen på tidslinjen eller redigera datumen i kurslistan. På mobil visas kurslistan. **Skapa alternativ** kopierar ett ärende med egna kursrader.
-4. **Exportera** visar den befintliga Word/PDF-mallen. Namn kan anges tillfälligt för dokumentet och rensas vid nedladdning eller när dialogen stängs. Filnamnet är Studieplanering följt av datum. Mallval kan sparas i webbläsaren.
-5. Använd **Exportera ärendet som JSON** eller **Exportera alla ärenden som JSON** för säkerhetskopiering. Importen lägger till ärenden med nya lokala ID:n. Radering av ett ärende kräver bekräftelse och tar bort dess kursrader.
+1. Öppna **Mina studieplaneringar** och välj **Ny studieplanering**. Ange program och planeringsläsår. Lägg till antagningsår och aktuell årskurs om de är kända.
+2. Välj **Lägg till kurs** i arbetsytan, eller gå till **LTH:s kurskatalog** för den fullständiga läro- och timplanen. Filtrera på årskurs, kategori, specialisering eller LP. I kursdialogen är den officiella placeringen skild från planerad placering. Egna och externa kurser kan läggas till manuellt.
+3. Arbeta i **Läsårsöversikt**, **Terminsvy**, **Kurslista** eller **Kalender**. Dra kursen till en LP-ruta eller använd **Ändra placering**. Spara ett flerperiodsval som en enda kurs. Lägg till läsår när det behövs.
+4. Använd **Omtentamensperioder** och **Kompletteringar** för kvarstående examinationer. En kurskoppling kan behållas när kursen flyttas. Vid borttagning väljer du om kopplade moment ska behållas fristående eller också tas bort.
+5. Välj **Skapa alternativ** för att kopiera kursplanen inom ärendet. Välj uttryckligen om även moment och anteckningar ska följa med. Använd **Jämför två scenarier** för att se skillnader i kursval, belastning och kvarstående moment.
+6. Skriv kort agenda och planeringsöverenskommelser och lägg vid behov till nästa steg med datum och ansvar.
+7. Välj **Granska och exportera** för Word eller PDF. Välj översikt eller detaljerat underlag och ett eller två scenarier. Studentens namn är valfritt och rensas vid nedladdning eller när dialogen stängs. Under **Fler inställningar** finns bland annat A4 stående/liggande, mall och källavsnitt.
+8. Använd JSON-export och import för säkerhetskopior. Det går att spara ett ärende med dess scenarier eller hela arbetsytan. Radering av ett ärende eller scenario kräver bekräftelse.
 
-Planeringsläsåret styr arbetsytan. Katalogens läsår anger vilken version av kursutbudet som visas. Kontrollera utbildningsplanen för aktuell antagningskull och det faktiska schemat i TimeEdit. Källans LP-placering kan omfatta flera perioder. Kursens totala poäng delas inte mellan dem.
+Planeringsläsåret och katalogens källäsår har olika roller. Använd LTH:s källor för att kontrollera utbildningsplan, kurstillfälle, omtentamen och faktiskt schema. Poäng för flera perioder fördelas bara om vägledaren uttryckligen anger en uppskattning. Ofördelade kurser har kvar sina totala kurspoäng. Avklarat och delpoäng är manuella uppgifter i planen.
 
-Skriv kortfattade och avidentifierade planeringsanteckningar. Undvik namn, kontaktuppgifter, personnummer och känsliga uppgifter. Även namnfria uppgifter kan identifiera personer i kombination. Webbläsarens lokala data kan försvinna vid rensning och synkas inte.
+Håll anteckningar avidentifierade. Undvik namn, kontaktuppgifter, personnummer och känsliga uppgifter. Namnfria uppgifter kan identifiera personer i kombination. Webbläsarens lokala data kan försvinna vid rensning och synkas inte.
 
-## Om du har äldre planer
+## Äldre planer
 
-**Äldre lokala planer hittades** visas när föregående version har lämnat lokala uppgifter. Du kan fortsätta med nya ärenden, granska och konvertera valda planer eller radera den äldre lagringen. Du kan också läsa in en äldre JSON-fil via samma granskningssteg. Namn och äldre fritext förs inte över automatiskt. Egna kurstitlar ersätts med en neutral titel och kan ändras efter granskning. Den gamla lagringen ligger kvar efter konvertering tills du raderar den separat.
+Namnfria ärenden från tidigare versioner öppnas med kursdatum och anteckningar bevarade i ett första scenario. Under **Äldre lokala planer hittades** kan äldre studentprofiler granskas, konverteras eller raderas. Namn och tidigare fritext förs inte över automatiskt. Egna kurstitlar får en neutral titel för granskning. Originalet finns kvar tills du väljer att radera det.

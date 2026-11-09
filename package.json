@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check dist/cases.js && node --check dist/case-view.js && node --check dist/catalog-view.js && node --check dist/lth-calendar.js && node --check dist/program-catalog.js && node --check dist/app-v2.js && node --check dist/model.js && node --check dist/exports.js && node --check dist/export-ui.js && node --check dist/export-settings.js",
+    "check": "node --check dist/planning.js && node --check dist/planning-view.js && node --check dist/course-placement-ui.js && node --check dist/planning-export.js && node --check dist/cases.js && node --check dist/case-view.js && node --check dist/catalog-view.js && node --check dist/lth-calendar.js && node --check dist/program-catalog.js && node --check dist/app-v2.js && node --check dist/model.js && node --check dist/exports.js && node --check dist/export-ui.js && node --check dist/export-settings.js",
     "test": "node --test tests/*.test.mjs",
     "build": "node build.mjs",
     "sync:catalog": "node --use-system-ca tools/sync-lth-catalog.mjs",

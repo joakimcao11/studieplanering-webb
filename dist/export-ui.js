@@ -8,8 +8,8 @@ export function openExportPanel(context) {
  const dialog = document.querySelector('#editor');
  const controller = new AbortController();
  const {signal} = controller;
- let settings = normalizedExportSettings({...context.saved,includeStudent:true});
- let temporaryName = '';
+ let settings = normalizedExportSettings({...context.saved,date:context.date,scope:context.defaultScope,includeStudent:true});
+ let temporaryName = context.name || '';
  let timer, revision = 0, busy = false, logoRevision = 0;
  const field = (name,label,type='text') => `<label>${label}<input name="${name}" type="${type}" value="${exportEsc(settings[name])}" maxlength="180"></label>`;
  const checkbox = (name,label) => `<label class="inline-check"><input type="checkbox" name="${name}" ${settings[name]?'checked':''}> ${label}</label>`;
@@ -21,11 +21,12 @@ export function openExportPanel(context) {
  <div class="form-grid">
  ${select('documentMode','Dokument',[['overview','Studieplan – översikt'],['detail','Detaljerat planeringsunderlag']],settings.documentMode)}
  ${field('date','Dokumentdatum','date')}
- ${select('scope','Omfattning',[['all','Hela planen'],['year',context.yearLabel],...(context.termOptions || [])],'all')}
+ ${select('scope','Omfattning',context.scopes,context.defaultScope)}
  ${select('additionalScenario','Exportera scenario',[['','Enbart '+context.scenario.name],...context.others.map(s=>[s.id,context.scenario.name+' och '+s.name])],'')}
  </div>
- <label>Studentens namn (valfritt, används bara i detta dokument)<input id="temporary-name" maxlength="120" autocomplete="off" spellcheck="false"></label>
- <p class="note-footer">Namnet rensas efter nedladdning eller när du stänger dialogen.</p>
+ <label>Studentens namn (valfritt i dokumentet)<input id="temporary-name" maxlength="120" autocomplete="off" spellcheck="false" value="${exportEsc(temporaryName)}"></label>
+ <p class="note-footer">Namnet ingår bara i Word och PDF om det står kvar här.</p>
+ <label class="inline-check"><input type="checkbox" name="includeActionPlan"> Inkludera hela mål- och handlingsplanen</label>
  <div class="form-grid">${field('advisor','Vägledarens namn')}${field('role','Titel')}${field('institution','Organisation')}</div>
  <details class="export-more"><summary>Anpassa dokument</summary>
  <div class="form-grid">${select('template','Mall',[['neutral','Neutral'],['lth','LTH – textmall'],['lu','LU – textmall'],['custom','Anpassad']],settings.template)}
@@ -88,6 +89,7 @@ export function openExportPanel(context) {
  settingsHost.addEventListener('input',event=>{
   const field = event.target;
   if (field.id==='export-logo') return;
+  if (field.name==='scope') settingsHost.querySelector('[name=includeActionPlan]').disabled = field.value==='actions';
   if (field.name==='template') {
    const defaults = templateDefaults[field.value];
    settingsHost.querySelector('[name=accent]').value = defaults.accent;
@@ -97,6 +99,7 @@ export function openExportPanel(context) {
   }
   schedule();
  },{signal});
+ settingsHost.querySelector('[name=includeActionPlan]').disabled = context.defaultScope==='actions';
  settingsHost.addEventListener('change',async event=>{
   if (event.target.id!=='export-logo') return;
   const file = event.target.files[0];
@@ -145,10 +148,6 @@ export function openExportPanel(context) {
    const result = await (pdf ? createPDF(data) : createWord(data));
    if (signal.aborted) return;
    downloadFile(result,'Studieplanering'+(context.programme?'_'+context.programme:'')+'_'+settings.date+'.'+(pdf?'pdf':'docx'));
-   temporaryName = '';
-   settingsHost.querySelector('#temporary-name').value = '';
-   previewHost.replaceChildren();
-   schedule();
    status.textContent = 'Dokumentet är klart och finns i webbläsarens hämtningar.';
   } catch (error) { status.textContent = 'Exporten misslyckades. '+error.message; }
   finally {

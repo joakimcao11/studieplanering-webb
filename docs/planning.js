@@ -1,5 +1,5 @@
 import { officialCalendar, programmeStructure } from './lth-calendar.js';
-import { periodLabel } from './program-catalog.js';
+import { compareOfferingMetadata, offeringTimePlans, periodLabel } from './program-catalog.js';
 import { academicLabel, monthEnd } from './model.js';
 
 export const slots = { 1:'LP1', 2:'LP2', 3:'LP3', 4:'LP4', HT:'Hösttermin', VT:'Vårtermin', SUMMER:'Sommar', OWN:'Egen placering' };
@@ -7,7 +7,10 @@ export const examStates = { planned:'Planerad', registered:'Anmäld', sat:'Genom
 export const completionStates = { todo:'Ej påbörjad', progress:'Pågår', submitted:'Inlämnad', awaiting:'Inväntar bedömning', passed:'Godkänd', redo:'Behöver göras om' };
 export const completionTypes = { assignment:'Inlämningsuppgift', lab:'Laboration', project:'Projekt', presentation:'Redovisning', other:'Annan examination' };
 export const roles = { student:'Student', advisor:'Vägledare', other:'Annat' };
+export const priorities = { normal:'Normal', high:'Hög', low:'Låg' };
+export const horizons = { period:'Läsperiod', term:'Termin', year:'Läsår' };
 export const stepStates = { todo:'Planerad', progress:'Pågår', done:'Klar' };
+export const taskKinds = ['retakes','completions','steps'];
 export const courseStates = { planned:'Planerad', progress:'Pågår', done:'Avklarad', summer:'Sommarstudier' };
 export const retakeWindows = { TP4:'Omtentamensperiod I · Tp4', TP6:'Omtentamensperiod II · Tp6', OWN:'Eget tillfälle' };
 
@@ -77,12 +80,25 @@ export function validateTask(input, kind) {
  if (kind === 'steps') {
   const task = planText(input.task,240);
   if (!task) throw Error('Ange ett nästa steg.');
-  return {id:input.id,task,role:oneOf(roles,input.role),date:optionalDate(input.date),status:oneOf(stepStates,input.status)};
+  const result = {id:input.id,task,role:oneOf(roles,input.role),date:optionalDate(input.date),status:oneOf(stepStates,input.status)};
+  if (input.courseId) {
+   if (!isPlanId(input.courseId)) throw Error('Ogiltig kurskoppling.');
+   result.courseId = input.courseId;
+  }
+  if (input.code) result.code = planText(input.code,40).toUpperCase();
+  if (input.period) {
+   result.year = checkedPlanYear(input.year);
+   result.period = oneOf(slots,input.period);
+  }
+  if (input.priority) result.priority = oneOf(priorities,input.priority);
+  return result;
  }
  const isRetake = kind === 'retakes';
  const task = {id:input.id,courseId:input.courseId === null ? null : input.courseId,
   code:planText(input.code,40).toUpperCase(),year:checkedPlanYear(input.year),date:optionalDate(input.date),
   note:planText(input.note,500),status:oneOf(isRetake ? examStates : completionStates,input.status)};
+ if (input.role) task.role = oneOf(roles,input.role);
+ if (input.priority) task.priority = oneOf(priorities,input.priority);
  if (task.courseId !== null && !isPlanId(task.courseId)) throw Error('Ogiltig kurskoppling.');
  if (isRetake) return {...task,period:oneOf(retakeWindows,input.period),reminder:optionalDate(input.reminder)};
  const description = planText(input.description,240);
@@ -105,12 +121,18 @@ export function validateScenario(input) {
   periodNotes[key] = planText(value,500);
  }
  const result = {id:input.id,name,years,agenda:planText(input.agenda,1000),agreements:planText(input.agreements,1000),periodNotes};
+ if (input.goal) result.goal = {text:planText(input.goal.text,500),date:optionalDate(input.goal.date),horizon:planText(input.goal.horizon,120)};
+ if (input.view) {
+  const {year,slot,horizon,focus} = input.view;
+  if (!years.includes(year) || !/^(?:[1-4]|HT|VT)$/.test(slot) || !hasKey(horizons,horizon) || !['courses','actions'].includes(focus)) throw Error('Ogiltig planeringsvy.');
+  result.view = {year,slot,horizon,focus};
+ }
  const ids = new Set();
- for (const kind of ['retakes','completions','steps']) {
+ for (const kind of taskKinds) {
   if (!Array.isArray(input[kind])) throw Error('Ogiltiga moment eller nästa steg.');
   result[kind] = input[kind].map(item=>{
    const validated = validateTask(item,kind);
-   if (ids.has(validated.id) || (kind!=='steps' && !years.includes(validated.year))) throw Error('Dubblett eller okänt läsår.');
+   if (ids.has(validated.id) || (validated.year!==undefined && !years.includes(validated.year))) throw Error('Dubblett eller okänt läsår.');
    ids.add(validated.id);
    return validated;
   });
@@ -125,8 +147,7 @@ export function sourcePlacements(course, record, year) {
  if (!course?.catalogYear || course.catalogYear !== String(year).slice(-2)+'_'+String(year+1).slice(-2) ||
      course.programmeId !== record.programmeId || !course.programmeId) return [];
  const termOnly = programmeStructure(record.programmeId,course.catalogYear).periods === 'terms';
- const plans = (course.timePlans || []).map(p=>p.periods).filter(p=>p.length);
- const all = plans.length ? plans : [course.periods || []];
+ const all = offeringTimePlans({timePlans:course.timePlans,periods:course.periods||[]});
  const choices = all.map(list=>[...new Set(list.map(n=>termOnly ? (n<=2?'HT':'VT') : String(n)))]);
  return choices.filter((list,i)=>list.length && choices.findIndex(other=>sameSlots(list,other))===i);
 }
@@ -187,6 +208,37 @@ export function termSlots(slotsInYear, term) {
  return term === 'HT' ? slotsInYear.slice(0,slotsInYear.length/2) : slotsInYear.slice(slotsInYear.length/2);
 }
 
+export const termForSlot = slot => ['1','2','HT'].includes(slot) ? 'HT' : 'VT';
+export const fullTimeBenchmark = (term = '', slot = '') => slot ? 15 : term ? 30 : 60;
+export const scopeTitle = (year, term = '', slot = '') => year===null?'Hela planen':
+ slot ? slots[slot]+' · '+(termForSlot(slot)==='HT'?'HT '+year:'VT '+(year+1)) :
+ term ? (term==='HT'?'Hösttermin '+year:'Vårtermin '+(year+1)) : 'Läsår '+yearText(year);
+
+export function scenarioView(record,scenario) {
+ const saved = scenario.view;
+ const year = saved?.year ?? (scenario.years.includes(record.planningYear)?record.planningYear:scenario.years[0]);
+ const allowed = planSlots(record,year);
+ const slot = allowed.includes(saved?.slot) ? saved.slot : allowed.find(p=>termForSlot(p)===termForSlot(saved?.slot || 'HT'));
+ const horizon = saved?.horizon ?? 'year';
+ return {year,slot,horizon:horizon==='period' && allowed.length===2?'term':horizon,focus:saved?.focus ?? 'courses'};
+}
+
+export function viewScope(view) {
+ return {year:view.year,term:view.horizon==='term'?termForSlot(view.slot):'',slot:view.horizon==='period'?view.slot:''};
+}
+
+export function sortPlannedCourses(courses,catalog) {
+ const periodRank = {1:1,2:2,3:3,4:4,HT:1,VT:3,SUMMER:5,OWN:6};
+ const rank = course => (course.catalogYear ? offeringTimePlans({timePlans:course.timePlans,periods:course.periods||[]})[0] : course.plannedPeriods).map(p=>periodRank[p]??7).sort((a,b)=>a-b);
+ const offers = new Map(courses.map(c=>[c.id,catalog?.courses.find(source=>source.code===c.code)?.offerings.find(o=>
+  o.programmeId===c.programmeId && (!c.offeringId || o.sourceId===c.offeringId)) || {}]));
+ return [...courses].sort((a,b)=>{
+  const x = rank(a), y = rank(b);
+  return a.plannedYear-b.plannedYear || (x[0]??7)-(y[0]??7) || (x[1]??x[0]??7)-(y[1]??y[0]??7) ||
+   compareOfferingMetadata(offers.get(a.id),offers.get(b.id)) || a.code.localeCompare(b.code,'sv') || a.title.localeCompare(b.title,'sv');
+ });
+}
+
 function termDates(record,year,term) {
  const cal = officialCalendar(year,record.programmeId,record.planningYear===year?record.studyYear:null);
  return term==='HT' ? cal?.autumn || [year+'-08-01',year+'-12-31'] : cal?.spring || [(year+1)+'-01-01',(year+1)+'-06-30'];
@@ -203,13 +255,23 @@ function courseTerms(course,record,year) {
   return course.plannedPeriods.some(p=>allowed.includes(p));
  });
 }
-export function scopePlan(courses, scenario, year = null, term = '', record = null) {
+export function scopePlan(courses, scenario, year = null, term = '', record = null, slot = '') {
  const allowed = term && record ? [...termSlots(planSlots(record,year),term),term] : null;
+ const intervals = slot && record ? datesForSlots(record,year,[slot]) : [];
+ const overlapsSlot = c => intervals.some(([start,end])=>c.start<=end && c.end>=start);
  const selected = courses.filter(c=>(year===null || c.plannedYear===year) &&
-  (!allowed || courseTerms(c,record,year).includes(term)));
- const within = task => year===null || (task.year===year && (!allowed || allowed.includes(task.period) ||
-  (term==='VT' && task.period==='TP4') || (task.period==='OWN' && (!task.date ||
-   (task.date>=termDates(record,year,term)[0] && task.date<=termDates(record,year,term)[1])))));
+  (!allowed || courseTerms(c,record,year).includes(term)) && (!slot || c.plannedPeriods.includes(slot) ||
+   (c.plannedPeriods.includes('OWN') && overlapsSlot(c))));
+ const selectedIds = new Set(selected.map(c=>c.id));
+ const within = task => {
+  if (year===null) return true;
+  if (task.year!==year) return false;
+  if (slot) return task.period===slot || (task.period==='TP4' && slot==='4') ||
+   (['OWN',termForSlot(slot)].includes(task.period) && (task.date?intervals.some(([a,b])=>task.date>=a && task.date<=b):
+    task.period==='OWN' && selectedIds.has(task.courseId)));
+  return !allowed || allowed.includes(task.period) || (term==='VT' && task.period==='TP4') ||
+   (task.period==='OWN' && (!task.date || (task.date>=termDates(record,year,term)[0] && task.date<=termDates(record,year,term)[1])));
+ };
  return {courses:selected,retakes:scenario.retakes.filter(within),completions:scenario.completions.filter(within)};
 }
 
@@ -220,23 +282,29 @@ function distribution(c,allowed) {
  return {value:count===c.plannedPeriods.length ? c.credits : 0,unknown:count>0 && count<c.plannedPeriods.length,manual:false};
 }
 
-export function summarizePlan(courses, scenario, record, year = null, term = '') {
- const scoped = scopePlan(courses,scenario,year,term,record);
+export function summarizePlan(courses, scenario, record, year = null, term = '', slot = '') {
+ const scoped = scopePlan(courses,scenario,year,term,record,slot);
  const unique = [...new Map(scoped.courses.map(c=>[c.id,c])).values()];
- const portion = (course,selectedTerm) => {
+ const portion = (course,selectedTerm,selectedSlot) => {
+  if (selectedSlot) {
+   if (!course.plannedPeriods.includes('OWN')) return distribution(course,[selectedSlot]);
+   const dates = datesForSlots(record,course.plannedYear,[selectedSlot]);
+   const contained = dates.some(([a,b])=>course.start>=a && course.end<=b);
+   return {value:contained?course.credits:0,unknown:!contained,manual:false};
+  }
   if (!selectedTerm) return {value:course.credits,unknown:false,manual:false};
   const terms = courseTerms(course,record,course.plannedYear);
   if (course.plannedPeriods.includes('OWN')) return {value:terms.length===1 && terms.includes(selectedTerm)?course.credits:0,unknown:terms.length>1,manual:false};
   return distribution(course,[...termSlots(planSlots(record,course.plannedYear),selectedTerm),selectedTerm]);
  };
- const total = sumHp(unique.map(c=>portion(c,term).value));
+ const total = sumHp(unique.map(c=>portion(c,term,slot).value));
  const done = sumHp(unique.map(c=>{
-  const part = portion(c,term);
-  if (!term || (!part.unknown && part.value===c.credits)) return courseDone(c);
+  const part = portion(c,term,slot);
+  if ((!term && !slot) || (!part.unknown && part.value===c.credits)) return courseDone(c);
   return c.status==='done' ? part.value : 0;
  }));
- const unknown = unique.filter(c=>portion(c,term).unknown).length;
- const unassignedDone = Boolean(term && unique.some(c=>c.status!=='done' && c.completedCredits>0 && portion(c,term).value!==c.credits));
+ const unknown = unique.filter(c=>portion(c,term,slot).unknown).length;
+ const unassignedDone = Boolean((term || slot) && unique.some(c=>c.status!=='done' && c.completedCredits>0 && portion(c,term,slot).value!==c.credits));
  const remainingRetakes = scoped.retakes.filter(t=>!['passed','cancelled'].includes(t.status)).length;
  const remainingCompletions = scoped.completions.filter(t=>t.status!=='passed').length;
  const byYear = (year===null ? scenario.years : [year]).map(y=>{
@@ -277,7 +345,8 @@ export function summarizePlan(courses, scenario, record, year = null, term = '')
  }
  if (remainingRetakes+remainingCompletions >= 3)
   warnings.push({kind:'Planeringsfråga',text:'Flera examinationer återstår. Kontrollera anmälan, tider och arbetsbelastning.'});
- return {...scoped,courses:unique,total,done,unknown,unassignedDone,remaining:sumHp([total,-done]),remainingRetakes,remainingCompletions,byYear,warnings};
+ return {...scoped,courses:unique,total,done,unknown,unassignedDone,remaining:sumHp([total,-done]),remainingRetakes,remainingCompletions,byYear,warnings,
+  benchmark:year===null?null:fullTimeBenchmark(term,slot)};
 }
 
 export function taskCourse(task,courses) {
@@ -290,8 +359,9 @@ export function copyScenario(original, courses, id, name, includeTasks, makeId) 
  const refs = new Map(courses.map((c,i)=>[c.id,copied[i].id]));
  const scenario = includeTasks ? structuredClone(original) : initialScenario(id,original.years[0], '', name);
  Object.assign(scenario,{id,name,years:[...original.years]});
- for (const kind of ['retakes','completions','steps']) {
-  scenario[kind] = scenario[kind].map(task=>({...task,id:makeId(),...(kind==='steps'?{}:{courseId:refs.get(task.courseId) || null})}));
+ if (original.view) scenario.view = {...original.view};
+ for (const kind of taskKinds) {
+  scenario[kind] = scenario[kind].map(task=>({...task,id:makeId(),...('courseId' in task?{courseId:refs.get(task.courseId) || null}:{})}));
  }
  return {scenario,courses:copied};
 }

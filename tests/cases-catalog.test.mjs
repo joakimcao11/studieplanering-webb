@@ -129,6 +129,7 @@ test('LTH-kalendern skiljer campusstarter, delad LP4, terminsprogram och okänt 
  assert.deepEqual(d.exams[6],['2027-08-16','2027-08-28']);
  assert.equal(officialCalendar(2026,'A',1).teaching,null);
  assert.equal(officialCalendar(2026,'KLMT',1).autumn[0],'2026-08-31');
- assert.equal(officialCalendar(2027,'D',1),null);
+ assert.deepEqual(officialCalendar(2027,'D',1).autumn,['2027-08-23','2028-01-16']);
+ assert.equal(officialCalendar(2028,'D',1),null);
  assert.equal(programmeStructure('OKÄNT','26_27').type,'unknown');
 });

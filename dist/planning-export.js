@@ -1,7 +1,7 @@
 import { normalizedExportSettings } from './export-settings.js';
-import { calendarSource, calendarDecision, programmeStructure } from './lth-calendar.js';
+import { calendarSource, calendarDecision, calendarDecision2027, programmeStructure } from './lth-calendar.js';
 import { periodLabel, choiceLabels } from './program-catalog.js';
-import { hp, yearText, slots, examStates, completionStates, completionTypes, courseStates, stepStates, roles, retakeWindows, rateDescription, plannedLabel, placementLabel, scenarioCourses, summarizePlan, planSlots } from './planning.js';
+import { hp, yearText, slots, examStates, completionStates, completionTypes, courseStates, stepStates, roles, priorities, retakeWindows, rateDescription, plannedLabel, placementLabel, scenarioCourses, summarizePlan, planSlots, scopeTitle, sortPlannedCourses } from './planning.js';
 
 const paragraphBlock = text => ({kind:'paragraph',text:String(text)});
 const headingBlock = text => ({kind:'heading',text:String(text)});
@@ -19,12 +19,12 @@ const loadText = load => {
  return load.unknown ? (load.hp?known+' · ':'')+'Fördelning ej verifierad ('+load.unknown+' kurser)' : known;
 };
 
-export function createPlanningSnapshot({record,scenarios,courses,catalog,year=null,term='',name='',options={}}) {
+export function createPlanningSnapshot({record,scenarios,courses,catalog,year=null,term='',slot='',actionsOnly=false,includeActionPlan=false,name='',options={}}) {
  const settings = normalizedExportSettings(options);
  const detail = settings.documentMode === 'detail';
- const title = settings.documentTitle === 'Studieplanering' ? (detail?'Detaljerat planeringsunderlag':'Studieplan – översikt') : settings.documentTitle;
+ const title = settings.documentTitle;
  const programme = catalog.programmes.find(p=>p.id===record.programmeId);
- const scope = year===null?'Hela planen':term ? (term==='HT'?'Hösttermin '+year:'Vårtermin '+(year+1)) : 'Läsår '+yearText(year);
+ const scope = actionsOnly?'Mål och handlingsplan':scopeTitle(year,term,slot);
  const documentInfo = [
   ...(settings.includeStudent && name.trim()?['Student: '+name.trim().slice(0,120)]:[]),
   ['Program: '+(programme ? programme.name+' ('+programme.code+')' : record.programmeId || 'Ej valt'),
@@ -36,27 +36,34 @@ export function createPlanningSnapshot({record,scenarios,courses,catalog,year=nu
  const summaries = [];
  for (const scenario of scenarios) {
   const all = scenarioCourses(courses,record,scenario);
-  const summary = summarizePlan(all,scenario,record,year,term);
+  const summary = summarizePlan(actionsOnly?[]:all,scenario,record,actionsOnly?null:year,actionsOnly?'':term,actionsOnly?'':slot);
+  const actions = actionsOnly || includeActionPlan;
+  const exams = actions ? scenario.retakes : summary.retakes;
+  const completions = actions ? scenario.completions : summary.completions;
+  const retakesOpen = exams.filter(t=>!['passed','cancelled'].includes(t.status)).length;
+  const completionsOpen = completions.filter(t=>t.status!=='passed').length;
   summaries.push({name:scenario.name,total:summary.total,done:summary.done,remaining:summary.remaining,
-   retakes:summary.remainingRetakes,completions:summary.remainingCompletions});
-  blocks.push({kind:'scenario',text:scenario.name},headingBlock('Planerade kurser'));
-  const ordered = [...summary.courses].sort((a,b)=>a.plannedYear-b.plannedYear || a.start.localeCompare(b.start) || a.title.localeCompare(b.title,'sv'));
+   retakes:retakesOpen,completions:completionsOpen});
+  blocks.push({kind:'scenario',text:scenario.name});
+  const ordered = sortPlannedCourses(summary.courses,catalog);
+  if (ordered.length) {
+  blocks.push(headingBlock('Studieplan'));
   const courseRows = ordered.map(c=>[c.code || 'Egen kurs',c.title,hp(c.credits),yearText(c.plannedYear),
    plannedLabel(c.plannedPeriods)+'\n'+placementLabel(c,record),courseStates[c.status]]);
-  blocks.push(tableBlock(['Kod','Kursnamn','HP','Läsår','Placering','Status'],[54,143,27,52,112,58],
-   courseRows.length?courseRows:[['','Inga kurser i vald omfattning.','','','','']]));
+  blocks.push(tableBlock(['Kod','Kursnamn','Kursens hp','Läsår','Placering','Status'],[54,143,46,52,112,58],courseRows));
   blocks.push(headingBlock('Sammanställning'),
-   paragraphBlock(hp(summary.total)+(term?' hp fördelade i terminen · ':' hp i planen · ')+hp(summary.done)+' hp avklarat · '+hp(summary.remaining)+' hp återstår.'),
-   ...(summary.unknown?[paragraphBlock(summary.unknown+' kurser saknar verifierad terminsfördelning.')]:[]),
-   ...(summary.unassignedDone?[paragraphBlock('Avklarade delpoäng utan terminsfördelning visas i läsårsöversikten.')]:[]),
+   paragraphBlock(hp(summary.total)+(term||slot?' hp med känd fördelning i tidsramen · ':' hp i planen · ')+hp(summary.done)+' hp avklarat · '+hp(summary.remaining)+' hp återstår.'),
+   ...(summary.benchmark?[paragraphBlock('Riktmärke vid heltidsstudier: '+(slot?'cirka ':'')+summary.benchmark+' hp.')]:[]),
+   ...(summary.unknown?[paragraphBlock(summary.unknown+' '+(summary.unknown===1?'kurs':'kurser')+' saknar verifierad poängfördelning i tidsramen. Kursraden visar kursens totala poäng.')]:[]),
+   ...(summary.unassignedDone?[paragraphBlock('Avklarade delpoäng utan fördelning visas i läsårsöversikten.')]:[]),
    paragraphBlock('Avklarat enligt planeringen. Uppgifterna behöver kontrolleras i Ladok.'),
-   paragraphBlock(summary.remainingRetakes+' omtentamina att följa upp · '+summary.remainingCompletions+' kvarstående kompletteringar.'));
+   paragraphBlock(retakesOpen+' '+(retakesOpen===1?'omtentamen':'omtentamina')+' att följa upp · '+completionsOpen+' kvarstående '+(completionsOpen===1?'komplettering':'kompletteringar')+'.'));
   if (detail) {
    blocks.push(headingBlock('Belastning per termin och period'));
    const rows = summary.byYear.flatMap(row=>{
-    const visible = term ? (term==='HT'?planSlots(record,row.year).slice(0,planSlots(record,row.year).length/2):planSlots(record,row.year).slice(planSlots(record,row.year).length/2)) : Object.keys(row.slots);
-    return [[yearText(row.year),term?'Fördelade poäng i terminen':'Unika kurspoäng hela läsåret',hp(term?summary.total:row.total)+' hp'],
-     ...(!term?[['', 'Hösttermin · känd belastning',loadText(row.HT)],['','Vårtermin · känd belastning',loadText(row.VT)]]:[]),
+    const visible = slot?[slot]:term ? (term==='HT'?planSlots(record,row.year).slice(0,planSlots(record,row.year).length/2):planSlots(record,row.year).slice(planSlots(record,row.year).length/2)) : Object.keys(row.slots);
+    return [[yearText(row.year),term||slot?'Fördelade poäng i tidsramen':'Unika kurspoäng hela läsåret',hp(term||slot?summary.total:row.total)+' hp'],
+     ...(!term&&!slot?[['', 'Hösttermin · känd belastning',loadText(row.HT)],['','Vårtermin · känd belastning',loadText(row.VT)]]:[]),
      ...visible.map(p=>['',slots[p],loadText(row.slots[p])])];
    });
    blocks.push(tableBlock(['Läsår','Omfattning','Planerad belastning'],[64,210,110],rows),
@@ -77,33 +84,38 @@ export function createPlanningSnapshot({record,scenarios,courses,catalog,year=nu
     })));
    }
   }
-  if (summary.retakes.length) blocks.push(headingBlock('Omtentamina'),tableBlock(
-   ['Kurs','Placering','Datum','Status','Följ upp anmälan'],[64,140,65,92,80],
-   summary.retakes.map(t=>[taskCourseCode(t,all),yearText(t.year)+' · '+taskPlacement(t),t.date || 'Ej angivet',examStates[t.status],t.reminder || '–'])));
-  if (summary.completions.length) blocks.push(headingBlock('Kompletteringar'),tableBlock(
-   ['Kurs','Typ och moment','Placering','Datum','Status'],[52,149,105,58,94],
-   summary.completions.map(t=>[taskCourseCode(t,all),completionTypes[t.type]+'\n'+t.description,yearText(t.year)+' · '+taskPlacement(t),t.date || 'Ej angivet',completionStates[t.status]])));
-  if (detail && settings.includeNotes) {
-   for (const t of [...summary.retakes,...summary.completions].filter(t=>t.note)) blocks.push(paragraphBlock(taskCourseCode(t,all)+' · '+t.note));
   }
-  blocks.push(headingBlock('Det här behöver kontrolleras'));
+  if (exams.length || completions.length) blocks.push(headingBlock('Kvarstående examinationer och uppföljning'));
+  if (exams.length) blocks.push(headingBlock('Omtentamina'),tableBlock(
+   ['Kurs','Placering','Datum','Status','Följ upp anmälan'],[64,140,65,92,80],
+   exams.map(t=>[taskCourseCode(t,all),yearText(t.year)+' · '+taskPlacement(t),t.date || 'Ej angivet',taskStatus(t,examStates),t.reminder || '–'])));
+  if (completions.length) blocks.push(headingBlock('Kompletteringar'),tableBlock(
+   ['Kurs','Typ och moment','Placering','Datum','Status'],[52,149,105,58,94],
+   completions.map(t=>[taskCourseCode(t,all),completionTypes[t.type]+'\n'+t.description,yearText(t.year)+' · '+taskPlacement(t),t.date || 'Ej angivet',taskStatus(t,completionStates)])));
+  if (detail && settings.includeNotes) {
+   for (const t of [...exams,...completions].filter(t=>t.note)) blocks.push(paragraphBlock(taskCourseCode(t,all)+' · '+t.note));
+  }
+  if (actions && scenario.goal && Object.values(scenario.goal).some(Boolean)) {
+   const {text,date,horizon} = scenario.goal;
+   blocks.push(headingBlock('Mål och handlingsplan'));
+   if (text) blocks.push(paragraphBlock(text));
+   if (date || horizon) blocks.push(paragraphBlock([date?'Måldatum: '+date:'',horizon?'Planeringshorisont: '+horizon:''].filter(Boolean).join(' · ')));
+  }
+  if (actions && scenario.steps.length) blocks.push(headingBlock('Nästa steg och uppföljning'),tableBlock(['Uppgift','Ansvar','Tid','Status'],[170,64,100,78],
+   scenario.steps.map(t=>[[t.task,t.courseId||t.code?taskCourseCode(t,all):''].filter(Boolean).join('\n'),roles[t.role],
+    [t.date,t.period?yearText(t.year)+' · '+slots[t.period]:''].filter(Boolean).join('\n') || '–',
+    [stepStates[t.status],t.priority&&t.priority!=='normal'?priorities[t.priority]+' prioritet':''].filter(Boolean).join('\n')])));
   const checks = summary.warnings.map(w=>w.kind+' · '+w.text);
-  if (summary.courses.length || summary.retakes.length) checks.push('Kontrollera kurstillfällen, datum och schema i TimeEdit. Omtentamensfönster är planeringsunderlag.');
-  if (checks.length) blocks.push(...checks.map(paragraphBlock));
-  else blocks.push(paragraphBlock('Inga granskningspunkter för vald omfattning.'));
+  if (ordered.length || exams.length) checks.push('Kontrollera kurstillfällen, datum och schema i TimeEdit. Omtentamensfönster är planeringsunderlag.');
+  if (checks.length) blocks.push(headingBlock('Det här behöver kontrolleras'),...checks.map(paragraphBlock));
   if (settings.includeNotes) {
-   if (detail && scenario.agenda) blocks.push(headingBlock('Syfte och agenda'),paragraphBlock(scenario.agenda));
-   if (scenario.agreements || scenario.steps.length) {
-    blocks.push(headingBlock('Överenskommelser och nästa steg'));
-    if (scenario.agreements) blocks.push(paragraphBlock(scenario.agreements));
-    if (scenario.steps.length) blocks.push(tableBlock(['Uppgift','Ansvar','Datum','Status'],[190,63,65,75],
-     scenario.steps.map(t=>[t.task,roles[t.role],t.date || '–',stepStates[t.status]])));
-   }
-   if (detail) {
+   if ((detail || actions) && scenario.agenda) blocks.push(headingBlock('Syfte och agenda'),paragraphBlock(scenario.agenda));
+   if (scenario.agreements) blocks.push(headingBlock('Planeringsöverenskommelser'),paragraphBlock(scenario.agreements));
+   if (detail && !actionsOnly) {
     const notes = Object.entries(scenario.periodNotes).filter(([key])=>{
      const [y,p] = key.split(':');
      const plan = summary.byYear.find(row=>row.year===Number(y));
-     return plan && (!term || (term==='HT'?['HT','1','2']:['VT','3','4']).includes(p));
+     return plan && (!slot || slot===p) && (!term || (term==='HT'?['HT','1','2']:['VT','3','4']).includes(p));
     });
     if (notes.length) blocks.push(headingBlock('Periodanteckningar'),...notes.map(([key,value])=>{
      const [y,p] = key.split(':');
@@ -125,12 +137,16 @@ export function createPlanningSnapshot({record,scenarios,courses,catalog,year=nu
  blocks.push(headingBlock('Källor och användning'),
   paragraphBlock('LTH:s läro- och timplan '+catalog.academicYearLabel+' · hämtad '+catalog.fetchedAt.slice(0,10)+'.\n'+catalog.sourceUrl),
   paragraphBlock('LTH:s läsårsindelning\n'+calendarSource),
-  ...(detail && settings.includeSources?[paragraphBlock(calendarDecision)]:[]),
-  paragraphBlock('Planeringsunderlaget är preliminärt. Kontrollera utbildningsplan, behörighet, examen, studiemedel och schema hos respektive ansvarig.'));
+  ...(detail && settings.includeSources?[...(year!==2027?[paragraphBlock(calendarDecision)]:[]),...(year===null||year===2027?[paragraphBlock(calendarDecision2027)]:[])]:[]),
+  paragraphBlock('Detta är ett planeringsunderlag. Behörighet, Ladokuppgifter och studiemedel kontrolleras hos respektive ansvarig.'));
  return {title,settings,documentInfo,blocks,summaries};
+}
+
+function taskStatus(task,states) {
+ return [states[task.status],roles[task.role],task.priority!=='normal'?priorities[task.priority]:null].filter(Boolean).join(' · ');
 }
 
 function taskCourseCode(task,courses) {
  const c = courses.find(c=>c.id===task.courseId);
- return c?.code || c?.title || task.code || 'Ej kurskopplad';
+ return c?.code || c?.title || task.code || '–';
 }

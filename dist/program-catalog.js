@@ -18,6 +18,10 @@ export function offeringCategory(offer) {
 export const categoryLabels = {
  ...choiceLabels, thesis: 'Examensarbete', specialization: 'Specialisering', unknown: 'Kategori saknas'
 };
+const categoryRanks = Object.keys(categoryLabels);
+export function compareOfferingMetadata(a,b) {
+ return (a.year || 99)-(b.year || 99) || categoryRanks.indexOf(offeringCategory(a))-categoryRanks.indexOf(offeringCategory(b));
+}
 
 export function filterOfferings(catalog, filter) {
  const query = (filter.q || '').toLocaleLowerCase('sv').trim().split(/\s+/).filter(Boolean);
@@ -39,16 +43,21 @@ export function filterOfferings(catalog, filter) {
  });
 }
 
+function comparePeriods(x,y) {
+ return (x[0]??9)-(y[0]??9) || (x[1]??x[0]??9)-(y[1]??y[0]??9) || (x.at(-1)??9)-(y.at(-1)??9);
+}
+
+export function offeringTimePlans(offer) {
+ const alternatives = (offer.timePlans || []).map(plan=>plan.periods).filter(periods=>periods.length);
+ return (alternatives.length?alternatives:[offer.periods]).map(periods=>[...periods].sort((a,b)=>a-b)).sort(comparePeriods);
+}
+
 export function sortOfferings(rows) {
- const timeline = row => [...row.offer.periods].sort((a,b)=>a-b);
- const known = value => value ?? Infinity;
  return [...rows].sort((a,b)=>{
-  const x = timeline(a), y = timeline(b);
-  for (const [left,right] of [[x[0],y[0]],[x[1]??x[0],y[1]??y[0]],[x.at(-1),y.at(-1)]]) {
-   if (known(left)!==known(right)) return known(left)-known(right);
-  }
-  return String(a.offer.sortOrder ?? '').localeCompare(String(b.offer.sortOrder ?? ''),'sv',{numeric:true}) ||
+  return comparePeriods(offeringTimePlans(a.offer)[0],offeringTimePlans(b.offer)[0]) ||
+   compareOfferingMetadata(a.offer,b.offer) ||
    a.course.code.localeCompare(b.course.code,'sv') ||
+   String(a.offer.sortOrder ?? '').localeCompare(String(b.offer.sortOrder ?? ''),'sv',{numeric:true}) ||
    String(a.offer.sourceId ?? '').localeCompare(String(b.offer.sourceId ?? ''),'sv',{numeric:true});
  });
 }

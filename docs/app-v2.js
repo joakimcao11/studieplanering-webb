@@ -1,11 +1,12 @@
 import { months, period, intersects, visibleCourses, validateCourse, switchedYear, moveCourse } from './model.js';
 import { CASE_KEY, LEGACY_KEY, emptyWorkspace, newId, cleanCase, loadWorkspace, saveWorkspace, caseBackup, importCases, cleanPlannedCourse, legacyChoices, migrateLegacy, exportPreferences } from './cases.js';
-import { savedCases, startCaseForm, caseForm, caseProgram, casePrivacy, caseDescription, caseTitle } from './case-view.js';
+import { savedCases, startCaseForm, caseForm, caseProgram, casePrivacy, selectedProgramme } from './case-view.js';
 import { coursePanel, catalogResults, catalogCourseDetails, htmlEscape, officialLink } from './catalog-view.js';
 import { downloadFile } from './exports.js';
 import { openExportPanel } from './export-ui.js';
-import { initialScenario, scenarioFor, scenarioCourses, validateTask, copyScenario, planSlots, slots, hasKey, yearOf, yearText, isPlanYear, plannedLabel, placementLabel, planningDates, datesForSlots } from './planning.js';
-import { planningWorkspace, notesPanel, comparisonDialog, planDetailsDialog, taskForm, planDialog, formEnd } from './planning-view.js';
+import { initialScenario, scenarioFor, scenarioCourses, scenarioView, viewScope, scopeTitle, termForSlot, validateTask, taskKinds, copyScenario, planSlots, slots, hasKey, yearOf, yearText, isPlanYear, plannedLabel, placementLabel, planningDates, datesForSlots } from './planning.js';
+import { planningWorkspace, comparisonDialog, planDetailsDialog, taskForm, planDialog, formEnd } from './planning-view.js';
+import { stockholmDate, currentPlanningPeriod } from './lth-calendar.js';
 import { courseDraft, placementForm, sourcePlacementButtons } from './course-placement-ui.js';
 import { createPlanningSnapshot } from './planning-export.js';
 
@@ -26,16 +27,16 @@ let lastSaved = null;
 try { lastSaved = storage.getItem(CASE_KEY); } catch { /* Handled by loadWorkspace. */ }
 let { data, error: storageError } = loadWorkspace(storage, catalog);
 let readError = storageError;
-const localDate = new Date().toLocaleDateString('sv-SE', { timeZone:'Europe/Stockholm' });
-const defaultYear = Number(localDate.slice(0,4)) - (Number(localDate.slice(5,7)) < 8 ? 1 : 0);
+const defaultYear = currentPlanningPeriod(stockholmDate(),'',null).year;
 const activeCase = () => data.cases.find(c => c.id === data.activeCaseId);
 let mode = 'academic', year = activeCase()?.planningYear ?? defaultYear;
 let selected = year + '-08', dragged = null;
 let comparison = '', mobilePicker = false, preferredSlot = '';
-let workspaceView = 'planning';
-let completionFilters = {status:'open',period:'',course:''};
+let sessionStudent = '';
+let completionFilters = {status:'open',period:'',course:'',remaining:'open'};
 const activeScenario = () => scenarioFor(activeCase());
-let planYear = activeScenario()?.years.includes(year) ? year : activeScenario()?.years[0] ?? year;
+let planYear = activeCase() ? scenarioView(activeCase(),activeScenario()).year : year;
+let fallbackFullscreen = false;
 let legacy = null, migrationGroups = null;
 try { legacy = storage.getItem(LEGACY_KEY); } catch { /* Storage failure is surfaced above. */ }
 
@@ -62,16 +63,23 @@ function save(touch = false) {
 }
 
 function setActive(id) {
+ if (data.activeCaseId!==id) sessionStudent = '';
  data.activeCaseId = id;
  mode = 'academic';
- year = activeCase()?.planningYear ?? defaultYear;
+ year = activeCase() ? scenarioView(activeCase(),activeScenario()).year : defaultYear;
  selected = year + '-08';
- planYear = activeScenario()?.years.includes(year) ? year : activeScenario()?.years[0] ?? year;
+ planYear = year;
  comparison = '';
- completionFilters = {status:'open',period:'',course:''};
+ completionFilters = {status:'open',period:'',course:'',remaining:'open'};
  filter = defaultFilter();
  preferredSlot = '';
- if (!id) workspaceView = 'planning';
+}
+
+function setPlanView(values) {
+ const record = activeCase(), scenario = activeScenario();
+ scenario.view = {...scenarioView(record,scenario),...values};
+ scenario.view = scenarioView(record,scenario);
+ planYear = scenario.view.year;
 }
 
 function toast(message,undo){const t=document.querySelector('#toast');t.replaceChildren(document.createTextNode(message));if(undo){const b=document.createElement('button');b.textContent='Ångra';b.onclick=()=>{undo();const ok=save();render();toast(ok?'Ändringen har ångrats.':'Ändringen ångrades i arbetsytan. Sparning misslyckades.');};t.append(b);}t.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>t.classList.remove('show'),undo?12000:5000);}
@@ -90,8 +98,9 @@ function calendarPanelView() {
 
 function planView() {
  const record = activeCase();
- return planningWorkspace(record,activeScenario(),data.courses.filter(c=>c.caseId===record.id),planYear,comparison,completionFilters,catalog,
-  coursePanel(catalog,record,filter,activeCourses()));
+ const scenario = activeScenario(), view = scenarioView(record,scenario), courses = activeCourses();
+ const picker = view.focus==='courses' ? coursePanel(catalog,record,filter,courses) : '';
+ return planningWorkspace(record,scenario,courses,view,completionFilters,catalog,picker,currentPlanningPeriod(stockholmDate(),record.programmeId,record.studyYear));
 }
 
 function openPicker(slot) {
@@ -113,7 +122,9 @@ function courseEditor(id,code,offeringId) {
  if (!activeCase()) return;
  const previous = id ? activeCourses().find(c=>c.id===id) : code && activeCourses().find(c=>c.code===code);
  const source = sourceCourse(previous?.code || code);
- const draft = courseDraft(previous,source,activeCase(),activeScenario(),planYear,preferredSlot,activeCase().programmeId,offeringId);
+ const view = scenarioView(activeCase(),activeScenario());
+ const suggested = preferredSlot || (view.horizon==='period'?view.slot:view.horizon==='term'&&!source?planSlots(activeCase(),planYear).find(p=>termForSlot(p)===termForSlot(view.slot)):undefined);
+ const draft = courseDraft(previous,source,activeCase(),activeScenario(),planYear,suggested,activeCase().programmeId,offeringId);
  openDialog(placementForm(draft,activeCase(),activeScenario(),mobilePicker,source));
 }
 
@@ -186,14 +197,15 @@ let dialogReturnFocus = null;
 
 function helpDialog() {
  return planDialog('Så fungerar det',`<div class="details-body help">
- <h2>Arbeta med ett ärende</h2><ol><li>Skapa en studieplanering och ange program, årskurs och planeringsläsår.</li>
- <li>Sök i Välj kurser. Öppna kursnamnet för källuppgifter eller lägg till kursen direkt.</li>
+ <h2>Arbeta med ett ärende</h2><ol><li>Välj program eller Eget kursval. Den verifierade LTH-kalendern föreslår en period.</li>
+ <li>Välj Läsperiod, Termin eller Läsår under Kurser och studietakt. Öppna kursnamnet för källuppgifter.</li>
  <li>Dra kursen till en period eller öppna kursen och ändra placeringen.</li>
+ <li>Öppna Mål och handlingsplan för att planera examinationer och nästa steg med eller utan kurser.</li>
  <li>Exportera Word eller PDF. Använd JSON om du vill spara en namnfri säkerhetskopia.</li></ol>
  <h2>Kursutbud och antagningskull</h2><p>Antagningskullen anger när utbildningen påbörjades. Kursutbudet har ett eget källäsår. Kontrollera kraven i utbildningsplanen för antagningskullen.</p>
- <p>LP anger placering i LoT. Kursens HP räknas en gång i vald vy och fördelas inte mellan perioderna. Avklarad är en manuell markering.</p>
+ <p>LP anger placering i LoT. En kurs räknas en gång. För en del av kursen visas endast kända eller manuellt fördelade poäng. Avklarad är en manuell markering.</p>
  <h2>Lokal lagring och dokument</h2><p>${casePrivacy} Namnfria uppgifter kan identifiera någon i kombination. Planerna synkas inte och kan försvinna när webbläsardata rensas.</p>
- <p>Studentens namn kan anges i exportdialogen och rensas efter export eller när dialogen stängs. Välj översikt eller detaljerat underlag och vilka scenarier som ska ingå.</p>
+ <p>Ett tillfälligt studentnamn kan följa med i Word och PDF. Det rensas från arbetsytan vid omladdning eller ärendebyte.</p>
  <p>Kontrollera resultat i Ladok, examenskrav i utbildningsplanen, studiemedel hos CSN och schema i TimeEdit.</p>
  ${officialLink(catalog.sourceUrl,'Officiellt kursutbud på LTH')}</div><div class="dialog-actions"><button data-close>Stäng</button></div>`);
 }
@@ -209,48 +221,59 @@ function refreshCoursePanels(control) {
  if (control) (dialog.open?dialog:document).querySelector('[data-catalog-filter="'+control+'"]')?.focus();
 }
 
-const navigation = [
- ['meeting','Mötesanteckning','<path d="M6 3h8l4 4v14H6zM14 3v5h4M9 12h6m-6 4h6"/>'],
- ['planning','Studieplanering','<path d="m2 10 10-5 10 5-10 5zM6 12v5c3 2 9 2 12 0v-5m4-2v6"/>'],
- ['calendar','Kalender','<rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4m8-4v4M4 10h16m-11 5h2m3 0h2"/>'],
-];
-
-function meetingView(record) {
- const scenario = activeScenario();
- return `<div class="meeting-view"><section class="workspace-card meeting-card">
- <h1>Mötesanteckning</h1><p class="muted">Spara och återuppta en studieplan med ett ärende-ID.</p>
- <div class="actions"><button data-action="new-case">＋ Nytt ärende</button><button data-action="saved-cases">Öppna sparat</button></div>
- <p>${record?`${esc(caseTitle(record))} · ${esc(scenario.name)}`:'Inget aktivt ärende.'}</p></section>
- ${record?`<section class="workspace-card meeting-card"><h2>Grundinformation</h2><p>${esc(caseDescription(record,catalog))}</p>
- <div class="actions"><button data-action="edit-case">Ändra grundinformation</button></div></section>
- <section class="workspace-card meeting-card"><h2>Anteckningar och uppföljning</h2>${notesPanel(scenario,true)}</section>
- <section class="workspace-card meeting-card meeting-export"><div><h2>Exportera mötesanteckning</h2><p class="muted">Granska dokumentet och välj PDF eller Word.</p></div>
- <button class="primary" data-action="export">Granska och exportera</button></section>`:''}</div>`;
+function fullscreenLabel() {
+ return document.fullscreenElement || fallbackFullscreen ? 'Avsluta helskärm' : 'Helskärm';
 }
 
+function refreshFullscreen() {
+ document.body.classList.toggle('focus-workspace',fallbackFullscreen || Boolean(document.fullscreenElement));
+ const button = document.querySelector('[data-action=fullscreen]');
+ if (button) {
+  button.textContent = fullscreenLabel();
+  button.setAttribute('aria-pressed',String(document.body.classList.contains('focus-workspace')));
+ }
+}
+
+async function toggleFullscreen() {
+ if (document.fullscreenElement) await document.exitFullscreen();
+ else if (fallbackFullscreen) fallbackFullscreen = false;
+ else if (document.documentElement.requestFullscreen) {
+  try { await document.documentElement.requestFullscreen(); }
+  catch { fallbackFullscreen = true; }
+ } else fallbackFullscreen = true;
+ refreshFullscreen();
+}
+document.addEventListener('fullscreenchange',refreshFullscreen);
+document.addEventListener('keydown',event=>{
+ if (event.key==='Escape' && fallbackFullscreen && !dialog.open) {
+  fallbackFullscreen = false;
+  refreshFullscreen();
+ }
+});
+
 function render(focusHeading = false) {
- const app = document.querySelector('#app');
- const open = app.dataset.view===workspaceView ? [...app.querySelectorAll('details[id]')].map(el=>[el.id,el.open]) : [];
- app.dataset.view = workspaceView;
- const record = activeCase();
+ const app = document.querySelector('#app'), record = activeCase();
+ const focus = record ? scenarioView(record,activeScenario()).focus : '';
+ const open = app.dataset.view===focus ? [...app.querySelectorAll('details[id]')].map(el=>[el.id,el.open]) : [];
+ app.dataset.view = focus;
  app.innerHTML = `<div class="workspace-shell"><header class="workspace-masthead"><div class="workspace-frame workspace-header">
- <div class="workspace-brand"><strong>Studieplaneringsverktyg</strong><small>Studie- och karriärvägledning</small></div>
+ <div class="workspace-brand"><strong>Studieplaneringsverktyg</strong><small>För vägledning vid Lunds Tekniska Högskola</small></div>
  <div class="workspace-header-actions"><span id="save-status" role="status" data-save-error="${storageError}">${saveLabel()}</span>
  <button data-action="new-case">＋ Nytt ärende</button><button data-action="saved-cases">Öppna sparat</button>
+ <button data-action="fullscreen" aria-pressed="${fullscreenLabel()!=='Helskärm'}">${fullscreenLabel()}</button>
  <details class="workspace-menu" id="workspace-menu"><summary>Mer</summary><div class="workspace-menu-content">
  <button data-action="import">Importera JSON</button><button data-action="backup-all" ${data.cases.length?'':'disabled'}>Exportera alla ärenden som JSON</button>
- ${activeCase()?'<button data-case-backup="'+activeCase().id+'">Exportera aktuellt ärende som JSON</button><button data-action="close-case">Stäng ärendet</button>':''}
+ ${record?'<button data-case-backup="'+record.id+'">Exportera aktuellt ärende som JSON</button><button data-action="close-case">Stäng ärendet</button>':''}
  ${legacy?'<button data-action="review-legacy">Granska äldre planer</button><button class="danger-text" data-action="remove-legacy">Ta bort äldre lagring</button>':''}
  <button data-action="help">Så fungerar det</button><button class="danger-text" data-action="clear-cases">Rensa alla lokala ärenden</button></div></details></div></div></header>
- <div class="workspace-nav"><nav class="workspace-frame" aria-label="Huvudnavigering">${navigation.map(([view,label,icon])=>
- `<button data-workspace-view="${view}" ${view===workspaceView?'aria-current="page"':''}><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${icon}</svg>${label}</button>`).join('')}</nav></div>
+ ${record?`<div class="workspace-nav"><nav class="workspace-frame" aria-label="Arbetssätt">
+ ${[['courses','Kurser och studietakt'],['actions','Mål och handlingsplan']].map(([key,label])=>
+ `<button data-focus-view="${key}" ${focus===key?'aria-current="page"':''}>${label}</button>`).join('')}</nav></div>`:''}
  <main id="main" class="workspace-frame workspace-main" tabindex="-1">
  ${readError?'<p class="notice" role="alert">Sparade ärenden kunde inte läsas. Lagringen skrivs inte över. Rensning finns under Mer.</p>':
  storageError?'<p class="notice" role="alert">Sparning misslyckades. Säkerhetskopiera arbetsytan som JSON innan du laddar om.</p>':''}
- ${workspaceView==='meeting'?meetingView(record):workspaceView==='calendar'?`<div id="workspace-calendar">
- <section class="workspace-intro"><h1>Kalender</h1><p>Visa planeringen som kalenderår, läsår eller termin.</p></section>
- ${record?`<div id="calendar-content">${calendarPanelView()}</div>`:'<section class="workspace-card meeting-card"><h2>Inget aktivt ärende</h2><p>Skapa eller öppna ett ärende för att se kurser i kalendern.</p><div class="actions"><button data-action="new-case">＋ Nytt ärende</button><button data-action="saved-cases">Öppna sparat</button></div></section>'}</div>`:record?planView():startCaseForm(catalog,defaultYear)}</main>
- <footer class="workspace-footer"><div class="workspace-frame"><span>Studie- och karriärvägledning · Studieplanering</span><span>Lokal arbetsyta</span></div></footer></div>`;
+ ${record?planView():startCaseForm(catalog)}</main>
+ <footer class="workspace-footer"><div class="workspace-frame"><span>Studieplanering · Lokalt planeringsstöd</span></div></footer></div>`;
  for (const [id,isOpen] of open) {
   const details = document.getElementById(id);
   if (details && app.contains(details)) details.open = isOpen;
@@ -263,11 +286,12 @@ function render(focusHeading = false) {
 }
 
 function openCalendar() {
+ mode = 'academic'; year = planYear; selected = year+'-08';
  openDialog(planDialog('Kalenderdatum',`<div id="calendar-content" class="details-body">${calendarPanelView()}</div><div class="dialog-actions"><button data-close>Stäng</button></div>`));
 }
 
 function refreshCalendar(control) {
- const host = dialog.querySelector('#calendar-content') || document.querySelector('#workspace-calendar #calendar-content');
+ const host = dialog.querySelector('#calendar-content');
  if (!host) return;
  host.innerHTML = calendarPanelView();
  if (control) host.querySelector(control)?.focus({preventScroll:true});
@@ -306,14 +330,20 @@ function exportDialog() {
  const record = activeCase();
  const scenario = activeScenario();
  if (!record) return;
- const visibleYear = planYear;
+ const view = scenarioView(record,scenario);
+ const {year:visibleYear,term,slot} = viewScope(view);
+ const defaultScope = view.focus==='actions'?'actions':slot?'lp-'+slot:term || 'year';
  const others = record.scenarios.filter(s=>s.id!==scenario.id);
  openExportPanel({scenario,others,programme:caseProgram(record,catalog)?.code,saved:data.exportSettings,
-  yearLabel:'Läsår '+yearText(visibleYear),termOptions:[['HT','Hösttermin '+visibleYear],['VT','Vårtermin '+(visibleYear+1)]],
+  name:sessionStudent, date:stockholmDate(new Date(record.createdAt)), defaultScope,
+  scopes:[...planSlots(record,visibleYear).filter(p=>/^\d$/.test(p)).map(p=>['lp-'+p,scopeTitle(visibleYear,'',p)]),
+   ['HT',scopeTitle(visibleYear,'HT')],['VT',scopeTitle(visibleYear,'VT')],['year',scopeTitle(visibleYear)],['all','Alla läsår'],['actions','Endast mål och handlingsplan']],
   snapshot:(options,name,extra)=>{
    const chosen = others.find(s=>s.id===extra);
    return createPlanningSnapshot({record,scenarios:chosen?[scenario,chosen]:[scenario],courses:data.courses,catalog,
-    year:options.scope==='all'?null:visibleYear,term:['HT','VT'].includes(options.scope)?options.scope:'',name,options});
+    year:options.scope==='all'?null:visibleYear,term:['HT','VT'].includes(options.scope)?options.scope:'',
+    slot:options.scope.startsWith('lp-')?options.scope.slice(3):'',actionsOnly:options.scope==='actions',
+    includeActionPlan:options.includeActionPlan,name,options});
   },
   onSave: settings => { data.exportSettings = exportPreferences(settings); return save(); },
   onBackup: () => exportJSON(record.id) });
@@ -383,6 +413,7 @@ function deleteCase(id) {
   data = { ...data, cases:data.cases.filter(c => c.id !== id), courses:data.courses.filter(c => c.caseId !== id),
    activeCaseId:data.activeCaseId === id ? null : data.activeCaseId };
   if (!save()) { data = before; toast('Ärendet kunde inte tas bort från lokal lagring.'); return false; }
+  if (before.activeCaseId===id) { sessionStudent = ''; setActive(null); }
    toast('Ärendet har tagits bort.');
   return true;
  });
@@ -457,7 +488,7 @@ function updateCourse(form, fields, values) {
  const error = validateCourse(course);
  if (error) throw Error('Ogiltig uppgift. '+error);
  replaceCourse(cleanPlannedCourse(course,catalog));
- planYear = plannedYear;
+ if (planYear!==plannedYear) setPlanView({year:plannedYear});
  finishEdit('Kursen har sparats.');
 }
 
@@ -466,25 +497,26 @@ function updateTask(form,values) {
  const scenario = activeScenario();
  const linked = activeCourses().find(c=>c.id===values.courseId);
  const task = validateTask({...values,id:form.dataset.id || newId(),courseId:linked?.id || null,code:linked?.code || values.code,year:Number(values.year)},kind);
- if (kind!=='steps' && !scenario.years.includes(task.year)) throw Error('Läsåret finns inte i scenariot.');
+ if (task.year!==undefined && !scenario.years.includes(task.year)) throw Error('Läsåret finns inte i scenariot.');
  const position = scenario[kind].findIndex(t=>t.id===task.id);
  if (position<0) scenario[kind].push(task);
  else scenario[kind][position] = task;
- if (kind==='completions') completionFilters = {status:'all',period:'',course:''};
- if (kind!=='steps') planYear = task.year;
+ if (kind==='completions') Object.assign(completionFilters,{status:'all',period:'',course:''});
  finishEdit('Momentet har sparats.');
 }
 
-function updateCase(form,values) {
+function updateCase(form,values,focus) {
  const editing = form.dataset.editing==='true';
  const old = editing ? activeCase() : null;
- const now = new Date().toISOString();
+ const instant = new Date(), now = instant.toISOString();
+ const programmeId = selectedProgramme(catalog,values.programmeQuery,old?.programmeId);
+ const studyYear = Number(values.studyYear) || null;
+ const current = currentPlanningPeriod(stockholmDate(instant),programmeId,studyYear);
+ const name = form.querySelector('[data-case-student]').value.trim();
  const record = cleanCase({ id:old?.id || newId(), createdAt:old?.createdAt || now, updatedAt:now,
-  programmeId:values.programmeId, admissionYear:Number(values.admissionYear) || null,
-  studyYear:Number(values.studyYear) || null, planningYear:Number(values.planningYear), targetCredits:Number(values.targetCredits || 60),
+  programmeId, admissionYear:Number(values.admissionYear) || null,
+  studyYear, planningYear:old?.planningYear ?? current.year, targetCredits:old?.targetCredits ?? 60,
   note:old?.note || '', alternative:old?.alternative || false });
- if (old && (old.programmeId !== record.programmeId || old.planningYear !== record.planningYear) &&
-  !window.confirm('Behålla befintliga kurser och markera kurskopplingar som behöver kontrolleras?')) return;
  if (old) {
   record.scenarios = old.scenarios;
   record.activeScenarioId = old.activeScenarioId;
@@ -492,12 +524,14 @@ function updateCase(form,values) {
   data.cases[data.cases.indexOf(old)] = record;
  } else {
   const scenario = initialScenario(newId(),record.planningYear);
+  const allowed = planSlots(record,current.year);
+  scenario.view = {year:current.year,slot:current.slot || allowed[0],horizon:allowed.length===2?'term':current.slot?'period':'year',focus:focus || 'courses'};
   record.scenarios = [scenario];
   record.activeScenarioId = scenario.id;
   data.cases.push(record);
  }
  setActive(record.id);
- if (!editing) workspaceView = 'planning';
+ sessionStudent = name;
  save();
  if (dialog.open) dialog.close();
  render(true);
@@ -532,7 +566,7 @@ document.addEventListener('submit', event => {
   if (form.id === 'task-form') updateTask(form,values);
   if (form.id === 'scenario-form') updateScenario(form,values);
   if (form.id === 'year-form') addPlanningYear(Number(values.year));
-  if (form.id === 'case-form') updateCase(form,values);
+  if (form.id === 'case-form') updateCase(form,values,event.submitter?.dataset.startFocus);
   if (form.id === 'migration-form') submitMigration(fields,values);
  } catch (error) { form.querySelector('#form-error').textContent = error.message; }
 });
@@ -540,29 +574,28 @@ document.addEventListener('submit', event => {
 function addPlanningYear(nextYear) {
  if (!isPlanYear(nextYear)) throw Error('Ange ett giltigt läsår.');
  rememberYear(activeScenario(),nextYear);
- planYear = nextYear;
- finishEdit('Läsåret har lagts till.');
+ setPlanView({year:nextYear,slot:planSlots(activeCase(),nextYear)[0]});
+ finishEdit('Planeringen visar läsåret '+yearText(nextYear)+'.');
 }
 
 function removeCourse(id) {
  const course = activeCourses().find(c=>c.id===id);
  if (!course) return;
  const scenario = activeScenario();
- const hasTasks = [...scenario.retakes,...scenario.completions].some(t=>t.courseId===id);
+ const hasTasks = taskKinds.some(kind=>scenario[kind].some(t=>t.courseId===id));
  openDialog(planDialog('Ta bort kurs',`<form id="remove-course-form"><p>Ta bort ${esc(course.code || course.title)} från det aktiva scenariot?</p>
  ${hasTasks?'<label>Kopplade moment<select name="tasks"><option value="detach">Behåll momenten och koppla loss kursen</option><option value="remove">Ta bort även kopplade moment</option></select></label>':''}
  ${formEnd('Ta bort kurs')}</form>`));
  dialog.querySelector('form').onsubmit = event => {
   event.preventDefault();
   const action = new FormData(event.target).get('tasks');
-  const before = {courses:data.courses,retakes:scenario.retakes,completions:scenario.completions};
-  for (const kind of ['retakes','completions']) scenario[kind] = action==='remove' ? scenario[kind].filter(t=>t.courseId!==id) :
+  const before = {courses:data.courses,tasks:taskKinds.map(kind=>[kind,scenario[kind]])};
+  for (const kind of taskKinds) scenario[kind] = action==='remove' ? scenario[kind].filter(t=>t.courseId!==id) :
    scenario[kind].map(t=>t.courseId===id ? {...t,courseId:null,code:course.code || t.code} : t);
   data.courses = data.courses.filter(c=>c.id!==id);
   if (!save(true)) {
    data.courses = before.courses;
-   scenario.retakes = before.retakes;
-   scenario.completions = before.completions;
+   for (const [kind,tasks] of before.tasks) scenario[kind] = tasks;
    toast('Kursen kunde inte tas bort från lokal lagring.');
    return;
   }
@@ -576,7 +609,8 @@ function editTask(kind,id,preferred) {
  const scenario = activeScenario();
  if (!['retakes','completions','steps'].includes(kind)) return;
  const task = scenario[kind].find(t=>t.id===id);
- openDialog(taskForm(kind,task,planYear,scenario,activeCourses(),activeCase(),preferred));
+ const view = scenarioView(activeCase(),scenario);
+ openDialog(taskForm(kind,task,planYear,scenario,activeCourses(),activeCase(),preferred || (kind==='completions' && view.horizon==='period'?view.slot:undefined),catalog));
 }
 
 function removeTask(kind,id) {
@@ -616,12 +650,21 @@ document.addEventListener('click', event => {
  const button = event.target.closest('button');
  if (!button) return;
  const b = button.dataset;
- if (b.workspaceView) {
-  if (workspaceView!==b.workspaceView) { workspaceView = b.workspaceView; render(true); }
+ if (b.focusView || b.horizon) {
+  setPlanView(b.focusView?{focus:b.focusView}:{horizon:b.horizon});
+  preferredSlot = ''; filter.lp = '';
+  save(); render(Boolean(b.focusView));
+  if (b.horizon) document.querySelector('[data-horizon="'+b.horizon+'"]')?.focus();
+  return;
+ }
+ if (b.remaining) {
+  completionFilters.remaining = b.remaining;
+  render();
+  document.querySelector('[data-remaining="'+b.remaining+'"]')?.focus();
   return;
  }
  if ('close' in b) { dialog.close(); return; }
- if (b.caseOpen) { setActive(b.caseOpen); workspaceView = 'planning'; save(); dialog.close(); render(true); return; }
+ if (b.caseOpen) { setActive(b.caseOpen); save(); dialog.close(); render(true); return; }
  if (b.caseDelete) { deleteCase(b.caseDelete); return; }
  if (b.caseBackup) { exportJSON(b.caseBackup); return; }
  if (b.mode) { year = switchedYear(mode,b.mode,year,selected); mode = b.mode; refreshCalendar('[data-mode="'+mode+'"]'); return; }
@@ -655,14 +698,16 @@ document.addEventListener('click', event => {
   case 'rename-scenario': scenarioEditor(activeCase(),true); break;
   case 'delete-scenario': removeScenario(); break;
   case 'add-year': openDialog(planDialog('Lägg till läsår',`<form id="year-form"><label>Läsårets startår<input type="number" name="year" min="1950" max="2100" value="${Math.min(2100,activeScenario().years.at(-1)+1)}" required autofocus></label>${formEnd('Lägg till läsår')}</form>`)); break;
-  case 'new-case': openDialog(caseForm(catalog,null,defaultYear)); break;
+  case 'new-case': openDialog(caseForm(catalog,null)); break;
   case 'saved-cases': openDialog(savedCases(data,catalog,legacy)); break;
-  case 'edit-case': openDialog(caseForm(catalog,activeCase(),defaultYear)); break;
+  case 'edit-case': openDialog(caseForm(catalog,activeCase(),sessionStudent)); break;
+  case 'next-year': if (planYear<2100) addPlanningYear(planYear+1); break;
+  case 'fullscreen': toggleFullscreen(); break;
   case 'close-case': setActive(null); save(); render(true); break;
   case 'calendar': openCalendar(); break;
   case 'help': openDialog(helpDialog()); break;
   case 'compare': openDialog(comparisonDialog(activeCase(),activeScenario(),data.courses,comparison)); break;
-  case 'plan-details': openDialog(planDetailsDialog(activeCase(),activeScenario(),data.courses)); break;
+  case 'plan-details': openDialog(planDetailsDialog(activeCase(),activeScenario(),data.courses,catalog)); break;
   case 'export': exportDialog(); break;
   case 'backup-all': exportJSON(); break;
   case 'import': importBackup(); break;
@@ -692,6 +737,11 @@ document.addEventListener('click', event => {
 
 document.addEventListener('input', event => {
  const field = event.target;
+ if (field.dataset.goal && activeScenario() && field.validity.valid) {
+  const scenario = activeScenario();
+  scenario.goal = {...(scenario.goal || {text:'',date:'',horizon:''}),[field.dataset.goal]:field.value};
+  save(true);
+ }
  if (field.dataset.planNote && activeScenario()) {
   const key = field.dataset.planNote;
   if (key.includes(':')) activeScenario().periodNotes[key] = field.value;
@@ -712,13 +762,17 @@ document.addEventListener('change', event => {
   render();
   document.querySelector('#active-scenario')?.focus();
  }
- if (field.id==='plan-year') {
-  planYear = Number(field.value);
+ if (field.id==='plan-year' || field.id==='plan-slot') {
+  const view = scenarioView(activeCase(),activeScenario());
+  if (field.id==='plan-year') setPlanView({year:Number(field.value)});
+  else setPlanView({slot:view.horizon==='term'?(planSlots(activeCase(),planYear).find(p=>termForSlot(p)===field.value)):field.value});
   year = planYear + (mode==='spring'?1:0);
   selected = year+'-08';
-  completionFilters = {status:'open',period:'',course:''};
+  preferredSlot = ''; filter.lp = '';
+  Object.assign(completionFilters,{status:'open',period:'',course:''});
+  save();
   render();
-  document.querySelector('#plan-year')?.focus();
+  document.getElementById(field.id)?.focus();
  }
  if (field.id==='compare-scenario') {
   comparison = field.value;

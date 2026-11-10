@@ -1,13 +1,13 @@
 # Studieplanering LTH
 
-Arbetsytan öppnar det aktiva ärendet när du laddar om sidan. Om inget ärende är öppet väljer du program och läsår och trycker på **Börja planera**. Inget studentnamn behövs.
+Välj program genom att skriva programnamn eller programkod. **Eget kursval** fungerar för fristående kurser och rena handlingsplaner. Ärendedatum sätts automatiskt. Årskurs och antagningsår ligger under **Fler uppgifter**.
 
-1. Sök i **Lägg till kurs**, eller öppna kursvalet med knappen med samma namn på mobilen. Årskursen föreslås från ärendet. För årskurs 4 och 5 visas specialiseringsvalet vid behov. Under **Fler filter** finns bland annat läsperiod, nivå och kursstatus.
-2. Öppna ett kursnamn för kursplan, LoT, förkunskaper och TimeEdit när källan har en länk. En kurs visas under första läsperioden. Ett senare periodfilter hittar även kurser som fortsätter från en tidigare period. Om LoT har olika erbjudanden kan du välja rätt variant.
-3. Dra kursen till en period eller öppna den i planen för att ändra placering, status, planeringsdatum och manuella värden. En fortsättning i en annan period är samma kurs. Om det finns kopplade moment får du välja hur de ska hanteras när en kurs tas bort.
-4. Öppna **Omtentamina** och **Kompletteringar** under planeringen. Dessa moment ökar inte kursens högskolepoäng. I fliken **Mötesanteckning** kan du skriva agenda och överenskommelser eller följa upp nästa steg för den aktiva planen.
-5. Skapa ett nytt alternativ inom ärendet eller byt plan i listan **Plan**. Under **Mer för planen** finns jämförelse och fler läsår. Öppna **Kalender** för att visa kurser per månad eller **Kurslista och belastning** för att se poänguppdelningen.
-6. Välj **Granska och exportera** i sammanställningen. Word och PDF kan omfatta ett eller två scenarier. **Anpassa dokument** innehåller mallval. Ett tillfälligt studentnamn rensas efter nedladdning eller när dialogen stängs. JSON innehåller enbart de namnfria ärendedata som sparats.
-7. Öppna tidigare ärenden via **Öppna sparat**. Under **Mer** i sidhuvudet finns import, säkerhetskopiering, stängning av aktivt ärende, hjälp och rensning. Äldre studentprofiler hanteras via det tidigare granskningsflödet. Originalet finns kvar tills du väljer att ta bort det.
+- **Kurser och studietakt** visar en läsperiod, termin eller ett läsår. För ett nytt ärende föreslår LTH:s verifierade kalender en undervisningsperiod. **Fortsätt till nästa läsår** öppnar nästa år i samma plan. Ett sparat ärende öppnas i sin senast valda tidsram.
+- **Lägg till kurs** öppnar kursvalet. Klicka på kursnamnet för LoT, kursplan, förkunskaper och TimeEdit. Klicka på en kurs i planen för att redigera den. På dator kan du också dra kursen till en annan period.
+- **Sammanställning** jämför vald tidsram med cirka 15 hp per läsperiod, 30 hp per termin eller 60 hp per läsår vid heltidsstudier. Kurser över flera perioder räknas en gång. För en del av en kurs visas kända eller manuellt fördelade poäng.
+- **Mål och handlingsplan** samlar mål, omtentamina, kompletteringar, nästa steg och anteckningar. Moment kan kopplas till en kurs eller registreras separat. **Kvar**, **Alla** och **Klara** filtrerar uppgifterna. Inlämnad och anmäld visas som pågående uppföljning.
+- **Visa detaljer** öppnar kurslista, kalender, alternativ och jämförelse mellan scenarier. **Helskärm** växlar visningssätt. Avsluta med knappen eller Escape.
+- **Granska och exportera** föreslår den aktuella tidsramen eller handlingsplanen. Välj om hela handlingsplanen ska följa med kursplanen. Word och PDF bygger på samma innehåll. För en säkerhetskopia välj **Exportera ärendet som JSON**.
+- **Öppna sparat** visar dina lokala ärenden. Under **Mer** finns import, säkerhetskopiering och hjälp. Ett tillfälligt studentnamn får endast plats i arbetsminnet och i det dokument där namnet valts. Håll även sparade anteckningar avidentifierade.
 
-Kursutbudet är en daterad kopia för 2026/27. Kontrollera utbildningsplanen för aktuell antagningskull, faktiskt kurstillfälle och schema i LTH:s källor. Fritext måste hållas avidentifierad. Lokala data synkas inte och kan försvinna när webbläsarens lagring rensas.
+Kurskatalogen visar LTH:s utbud för 2026/27. Termins- och perioddatum finns för läsåren 2026/27 och 2027/28. Kontrollera aktuell utbildningsplan, kurstillfälle och schema i LTH:s källor. Ärenden sparas i webbläsaren på den enhet där de skapades.

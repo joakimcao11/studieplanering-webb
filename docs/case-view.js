@@ -1,5 +1,5 @@
-import { htmlEscape, officialLink, programmeOptions } from './catalog-view.js';
-import { calendarSource, calendarDecision, officialCalendar } from './lth-calendar.js';
+import { htmlEscape, officialLink } from './catalog-view.js';
+import { calendarSource, calendarDecision, calendarDecision2027, officialCalendar, stockholmDate } from './lth-calendar.js';
 import { sortCases } from './cases.js';
 
 export const casePrivacy = 'Skriv kort och avidentifierat. Undvik namn, kontaktuppgifter, personnummer, hälsouppgifter och annat som kan identifiera någon.';
@@ -19,16 +19,19 @@ export function caseDescription(record, catalog) {
   'Planeringsläsår ' + record.planningYear + '/' + (record.planningYear + 1)].filter(Boolean).join(' · ');
 }
 
-export function startCaseForm(catalog,defaultYear) {
- return `<div class="start-view"><section class="workspace-intro"><h1>Studieplanering</h1><p>Välj program och läsår för att börja planera.</p></section>
- <section class="workspace-card start-card"><h2>Grundinformation</h2><form id="case-form">
- <div class="start-fields"><label>Program<select name="programmeId"><option value="">Eget kursval</option>${programmeOptions(catalog,'')}</select></label>
- <label>Planeringsläsår<input name="planningYear" type="number" min="1950" max="2100" value="${defaultYear}" required></label></div>
- <details class="start-optional"><summary>Årskurs och antagningsår (valfritt)</summary><div class="start-fields"><label>Årskurs<input type="number" name="studyYear" min="1" max="20"></label>
- <label>Antagningsår<input type="number" name="admissionYear" min="1950" max="2100"></label></div></details>
- <p id="form-error" class="error" role="alert"></p><button type="submit" class="primary">Börja planera</button>
- <p class="workspace-footnote">Ärendet sparas lokalt i den här webbläsaren utan studentnamn.</p>
- </form></section></div>`;
+const programLabel = program => program.code+' – '+program.name;
+export function selectedProgramme(catalog, value, previous = '') {
+ const query = value.trim().toLocaleLowerCase('sv');
+ if (!query || query==='eget kursval') return '';
+ const match = catalog.programmes.find(p=>[p.id,p.code,p.name,programLabel(p)].some(label=>label.toLocaleLowerCase('sv')===query));
+ if (match) return match.id;
+ if (query===previous.toLocaleLowerCase('sv')) return previous;
+ throw Error('Välj ett LTH-program i förslagen eller skriv Eget kursval.');
+}
+
+export function startCaseForm(catalog) {
+ return `<div class="start-view"><section class="workspace-intro"><h1>Studieplanering</h1><p>Planera kurser eller strukturera mål och nästa steg i samma ärende.</p></section>
+ <section class="workspace-card start-card"><h2>Nytt ärende</h2>${caseFields(catalog,null,false,'')}</section></div>`;
 }
 
 export function savedCases(data,catalog,legacy) {
@@ -43,19 +46,29 @@ export function savedCases(data,catalog,legacy) {
  <div class="dialog-actions"><button data-close>Stäng</button><button data-action="import">Importera JSON</button></div>`;
 }
 
-export function caseForm(catalog, record, defaultYear) {
- const r = record || { programmeId: '', planningYear: defaultYear, targetCredits: 60 };
- const programmes = programmeOptions(catalog, r.programmeId);
- return `<div class="dialog-head"><h2 id="editor-title">${record ? 'Ändra grundinformation' : 'Ny studieplanering'}</h2><button data-close aria-label="Stäng">✕</button></div>
- <form id="case-form" data-editing="${Boolean(record)}"><p class="form-intro">Grundinformationen sparas lokalt. Studentens namn kan anges tillfälligt i dokumentexporten.</p>
- <label>Program<select name="programmeId" autofocus><option value="">Ej valt / annan utbildning</option>
- ${r.programmeId && !caseProgram(r,catalog) ? `<option selected value="${htmlEscape(r.programmeId)}">Okänd programkod (${htmlEscape(r.programmeId)})</option>` : ''}${programmes}</select></label>
- <div class="form-grid"><label>Antagningsår<input type="number" name="admissionYear" min="1950" max="2100" value="${r.admissionYear ?? ''}" placeholder="Valfritt"><small>Året då utbildningen påbörjades.</small></label>
- <label>Aktuell årskurs<input type="number" name="studyYear" min="1" max="20" value="${r.studyYear ?? ''}" placeholder="Valfritt"></label>
- <label>Planeringsläsår (startår)<input type="number" name="planningYear" min="1950" max="2100" value="${r.planningYear}" required><small>Läsåret börjar på hösten och fortsätter nästa kalenderår.</small></label>
- <label>Eget mål i hp<input type="number" name="targetCredits" min="1" max="1000" value="${r.targetCredits}" required></label></div>
+function caseFields(catalog,record,modal,name) {
+ const program = record && caseProgram(record,catalog);
+ const day = stockholmDate(record ? new Date(record.createdAt) : new Date());
+ return `<form id="case-form" data-editing="${Boolean(record)}" autocomplete="off">
+ <p class="form-intro">Ärendedatum <time datetime="${day}">${day}</time></p>
+ <div class="start-fields">
+ <label>Program <input name="programmeQuery" list="case-programmes${modal?'-dialog':''}" value="${htmlEscape(program?programLabel(program):record?.programmeId || '')}" placeholder="Sök program eller välj Eget kursval" maxlength="160" ${modal?'autofocus':''}></label>
+ <datalist id="case-programmes${modal?'-dialog':''}"><option value="Eget kursval">${catalog.programmes.map(p=>'<option value="'+htmlEscape(programLabel(p))+'">').join('')}</datalist>
+ <label>Namn på student (valfritt)<input data-case-student maxlength="120" autocomplete="off" spellcheck="false" value="${htmlEscape(name)}"></label>
+ </div>
+ <details class="start-optional" ${record?.studyYear||record?.admissionYear?'open':''}><summary>Fler uppgifter</summary>
+ <div class="start-fields"><label>Årskurs<input type="number" name="studyYear" min="1" max="20" value="${record?.studyYear??''}"></label>
+ <label>Antagningsår<input type="number" name="admissionYear" min="1950" max="2100" value="${record?.admissionYear??''}"></label></div></details>
  <p id="form-error" class="error" role="alert"></p>
- <div class="dialog-actions"><button type="button" data-close>Avbryt</button><button type="submit" class="primary">${record ? 'Spara ändringar' : 'Skapa studieplanering'}</button></div></form>`;
+ <div class="actions case-start-actions">${modal?'<button type="button" data-close>Avbryt</button>':''}
+ <button type="submit" class="primary">${record?'Spara ändringar':'Kurser och studietakt'}</button>
+ ${record?'':'<button type="submit" data-start-focus="actions">Mål och handlingsplan</button>'}</div>
+ <p class="workspace-footnote">Ärendet sparas i den här webbläsaren. Namnet kan följa med i dokumentet och rensas vid omladdning eller ärendebyte.</p></form>`;
+}
+
+export function caseForm(catalog,record,name = '') {
+ return `<div class="dialog-head"><h2 id="editor-title">${record?'Ändra grundinformation':'Nytt ärende'}</h2><button data-close aria-label="Stäng">✕</button></div>
+ ${caseFields(catalog,record,true,name)}`;
 }
 
 export function calendarPanel(record, shownYear) {
@@ -68,5 +81,5 @@ export function calendarPanel(record, shownYear) {
   `<div class="calendar-periods">${Object.entries(cal.teaching).map(([number, intervals]) => `<div><b>LP${number}</b><br>${intervals.map(dates).join('<br>')}</div>`).join('')}</div>`}
  ${cal.note ? `<p>${htmlEscape(cal.note)}</p>` : ''}` : '<p>Det här läsårets datum finns inte i appens verifierade underlag.</p>'}
  <p>Kursens exakta datum kontrolleras i TimeEdit. Tidslinjen visar egna planeringsdatum.</p>
- <div class="actions">${officialLink(calendarSource,'Studentwebbens läsårsindelning')}${shownYear === 2026 ? officialLink(calendarDecision,'LTH:s beslut 2026/27') : ''}</div></details>`;
+ <div class="actions">${officialLink(calendarSource,'Studentwebbens läsårsindelning')}${shownYear === 2026 ? officialLink(calendarDecision,'LTH:s beslut 2026/27') : shownYear===2027?officialLink(calendarDecision2027,'LTH:s beslut 2027/28'):''}</div></details>`;
 }

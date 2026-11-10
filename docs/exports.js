@@ -112,7 +112,7 @@ export async function createWord(s,lib=globalThis.docx){
  if(!lib)throw Error('Word-stödet kunde inte laddas.');
  s = exportContent(s);
  const {Document,Packer,Paragraph,TextRun,Table,TableRow,TableCell,ImageRun,WidthType,HeadingLevel,AlignmentType,BorderStyle,Footer,Header,PageNumber}=lib,p=s.settings,serif=p.template==='lu',font=serif?'Times New Roman':'Arial',accent=serif?'201B17':p.accent.slice(1),logo=exportLogo(p),landscape=p.orientation==='landscape',totalWidth=landscape?14200:10050;
- const para=(text,opts={})=>new Paragraph({spacing:{after:100,line:250},children:[new TextRun({text:String(text),font,size:20,color:'111111',...opts.run})],...opts});
+ const para=(text,opts={})=>new Paragraph({spacing:{after:84,line:240},children:[new TextRun({text:String(text),font,size:20,color:'111111',...opts.run})],...opts});
  const border={style:BorderStyle.SINGLE,size:4,color:'DCE4EB'};
  const noBorder={style:BorderStyle.NONE,size:0,color:'FFFFFF'};
  const children=[];const logoChildren=[];
@@ -120,7 +120,7 @@ export async function createWord(s,lib=globalThis.docx){
  children.push(new Table({width:{size:totalWidth,type:WidthType.DXA},columnWidths:[Math.floor(totalWidth*.30),Math.floor(totalWidth*.70)],borders:{top:noBorder,bottom:noBorder,left:noBorder,right:noBorder,insideHorizontal:noBorder,insideVertical:noBorder},rows:[new TableRow({children:[new TableCell({children:logoChildren,borders:{top:noBorder,bottom:noBorder,left:noBorder,right:noBorder}}),new TableCell({borders:{top:noBorder,bottom:noBorder,left:noBorder,right:noBorder},children:[[p.role,p.advisor].filter(Boolean).join(' · '),p.institution,p.unit,p.date].filter(Boolean).map(v=>para(v,{alignment:AlignmentType.RIGHT,spacing:{after:40},run:{size:18}}))})]})]}));
  children.push(new Paragraph({spacing:{before:80,after:160},border:{bottom:{style:BorderStyle.SINGLE,size:8,color:accent}}}));
  if(p.includeContact){const contact=[p.postal&&'Postadress '+p.postal,p.visit&&'Besöksadress '+p.visit,p.phone&&'Telefon '+p.phone,p.email&&'E-post '+p.email,p.web&&'Webb '+p.web].filter(Boolean).join('   ');if(contact)children.push(para(contact,{run:{size:15,italics:true,color:'555C67'},spacing:{after:180}}));}
- children.push(para(s.title,{heading:HeadingLevel.TITLE,run:{size:34,bold:true,color:'111111'},spacing:{after:160},keepNext:true}));
+ children.push(para(s.title,{heading:HeadingLevel.TITLE,run:{size:34,bold:true,color:accent},spacing:{after:160},keepNext:true}));
  for (const info of s.documentInfo) children.push(para(info,{run:{size:20}}));
  const heading = (value,scenario=false)=>para(value,{heading:HeadingLevel.HEADING_1,run:{size:scenario?28:22,bold:true,color:accent},spacing:{before:180,after:100},keepNext:true});
  for (const block of s.blocks) {
@@ -131,7 +131,7 @@ export async function createWord(s,lib=globalThis.docx){
    const weight = block.weights.reduce((n,w)=>n+w,0);
    const widths = block.weights.map(w=>Math.floor(totalWidth*w/weight));
    const makeCell = (text,i,head)=>new TableCell({width:{size:widths[i],type:WidthType.DXA},
-    margins:{top:85,bottom:85,left:90,right:90},borders:{top:border,bottom:border,left:border,right:border},
+    margins:{top:70,bottom:70,left:90,right:90},borders:{top:border,bottom:border,left:border,right:border},
     shading:{fill:head?'F0F2F5':'FFFFFF'},
     children:String(text).split('\n').map(value=>para(value||' ',{spacing:{after:0,line:220},run:{size:18,bold:head}}))});
    const rows = [new TableRow({tableHeader:true,children:block.labels.map((value,i)=>makeCell(value,i,true))}),

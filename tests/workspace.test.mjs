@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs/promises';
-import { filterOfferings, distinctOfferings, sortOfferings } from '../dist/program-catalog.js';
+import { filterOfferings, distinctOfferings, offeringTimePlans, sortOfferings } from '../dist/program-catalog.js';
 import { CASE_KEY, loadWorkspace, validateWorkspace, caseBackup } from '../dist/cases.js';
 import { initialScenario, summarizePlan } from '../dist/planning.js';
 
@@ -31,6 +31,14 @@ test('olika specialiseringar bevaras som separata erbjudanden',()=>{
  assert.ok(rows.length>1);
  assert.ok(rows.some(r=>r.offer.specialization==='is'));
  assert.ok(rows.some(r=>r.offer.specialization==='hs'));
+});
+
+test('separata tidsplaner hålls isär och första kända läsperiod styr sorteringen',()=>{
+ const row=(code,title,periods,timePlans=[])=>({course:{code,title},offer:{periods,timePlans}});
+ const alternate=row('Z1','Zoologi',[1,2,4],[{periods:[4]},{periods:[1,2]}]);
+ const entries=[row('A4','Algebra',[4]),row('B3','Biologi',[3]),alternate,row('Y2','Ytbehandling',[2])];
+ assert.deepEqual(offeringTimePlans(alternate.offer),[[1,2],[4]]);
+ assert.deepEqual(sortOfferings(entries).map(r=>r.course.code),['Z1','Y2','B3','A4']);
 });
 
 test('tidigare aktiva ärenden återöppnas med samma kurser, och valt erbjudande kan sparas utan migrering',()=>{

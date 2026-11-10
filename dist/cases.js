@@ -92,7 +92,7 @@ export function validateWorkspace(input, catalog) {
  }
  for (const record of cases) {
   for (const scenario of record.scenarios) {
-   for (const task of [...scenario.retakes,...scenario.completions]) {
+   for (const task of [...scenario.retakes,...scenario.completions,...scenario.steps]) {
     if (!task.courseId) continue;
     const c = courseIds.get(task.courseId);
     if (!c || c.caseId!==record.id || c.scenarioId!==scenario.id) throw Error('Momentet är kopplat till en kurs i ett annat scenario eller till en borttagen kurs.');
